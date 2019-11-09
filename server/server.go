@@ -11,7 +11,9 @@ import (
 	"strconv"
 )
 
-var numServers = 3
+// Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- not sure if we need this
+
+const numServers = 3
 
 var majoritySize = math.Ceil(float64(numServers+1) / 2)
 
@@ -43,6 +45,12 @@ var leaderIndex int
 
 // Convert to epoch timestamp in ms
 var lastHeartbeatFromLeader int
+
+// this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
+var nextIndex [numServers]int // would be init in leader election
+
+// not sure where this is used -- but keeping it for now (initialize to 0)
+var matchIndex [numServers]int // would be init in leader election
 
 // Time in ms
 // May be check the timeout size effect on the overall system performance
@@ -94,7 +102,13 @@ func (t *Task) AppendEntries(lastTermId int, lastIndexId int, commitId int, keyv
 	return nil
 }
 
-func (t *Task) RequestVote(serverIndex int, serverTerm int, lastLogIndex int) error {
+// need to maintain what was the last term voted for
+// candidate term is the term proposed by candidate (current term + 1)
+// if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
+func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex int, lastLogTerm int, currentTerm *int, voteGranted *bool) error {
+	// Reply false if candidateTerm < currentTerm : TODO: should this be < or <=
+	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
+	// also update the currentTerm to the newly voted term
 	return nil
 }
 
@@ -105,8 +119,11 @@ func LeaderElection() error {
 	// sleep for leaderElectionTimeout
 	// probably need to extend the sleep/waiting time everytime lastHeartbeatfromleader is received (variable value can change in AppendEntries)
 
-	// For leaderElection: Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
+	// For leaderElection: Increment currentTerm
+	//Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
 	// If majority true response received, change leaderIndex = serverIndex
+	// Also reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
+	// if receiver's term is greater then, currentTerm is returned, update your current term and continue
 	return nil
 }
 
