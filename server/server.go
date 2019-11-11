@@ -1,3 +1,11 @@
+// see the key-value-distributed to see how rpcs are implemented.
+// nick: Leader election
+// nick: request vote
+// append entries
+// consistency checks
+// client input
+// unit tests
+
 package main
 
 import (
@@ -105,6 +113,45 @@ func (t *Task) AppendEntries(lastTermId int, lastIndexId int, commitId int, keyv
 // need to maintain what was the last term voted for
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
+
+/*
+
+These data points are required by the server and requestvote:
+
+* Server:
+
+- selfId: int
+- currentTerm: int
+- lastMessageTime: time (ms)
+- electionMinTime: time (ms)
+- electionMaxTime: time (ms)
+
+- cluster: server[]
+- server: (id, ip, port)
+
+- log: term[]
+- term: (termId, entry[])
+- termId: int
+- entry: (entryId, data)
+- entryId: int
+
+* RequestVote RPC:
+
+"Plz vote for me as new leader!"
+
+Sends async RPC to all clients.
+
+- term := currentTerm
+- candidateId := selfId
+- lastLogTerm := log[-1].termId
+- lastLogIndex := log[-1][-1].entryId
+
+Receives election result:
+
+- term: new currentTerm, if bigger.
+- voteGranted?: bool
+
+*/
 func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex int, lastLogTerm int, currentTerm *int, voteGranted *bool) error {
 	// Reply false if candidateTerm < currentTerm : TODO: should this be < or <=
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
