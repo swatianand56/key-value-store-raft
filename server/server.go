@@ -43,6 +43,9 @@ var serverIndex int
 
 var leaderIndex int
 
+// index of the last committed entry
+var commitIndex int
+
 // Convert to epoch timestamp in ms
 var lastHeartbeatFromLeader int
 
@@ -99,6 +102,7 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 // If possible update the timeout time for leader election
 // ...
 func (t *Task) AppendEntries(lastTermId int, lastIndexId int, commitId int, keyvaluepair KeyValuePair) error {
+	// if leaderCommitIndex > commitIndex on server, apply the commits to the log file (should only be done after replication and logMatching is successful)
 	return nil
 }
 
