@@ -20,6 +20,8 @@ import (
 )
 
 // Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- not sure if we need this
+//var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
+//var currentTerm int
 
 const numServers = 3
 
@@ -54,6 +56,8 @@ var leaderIndex int
 // index of the last committed entry
 var commitIndex int
 
+var lastAppliedIndex int
+
 // Convert to epoch timestamp in ms
 var lastHeartbeatFromLeader int
 
@@ -86,6 +90,7 @@ type Task int
 // If this server not the leader, redirect the request to the leader (How can client library know who the leader is?)
 func (t *Task) GetKey(key string, value *string) error {
 	// read the value of the key from the file and return
+	// do log replication and commit on get entries to get the most consistent response in case of leader failure
 	return nil
 }
 
@@ -97,7 +102,8 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	// 2. Send AppendEntries to all other servers in async
 	// 3. When majority response received, add to the server file
 	// 4. If AppendEntries fail, need to update the lastMatchedLogIndex for that server
-	// Update the last commit ID? -- Do we need it as a variable?
+	// Keep trying indefinitely unless the entry is replicated on all servers
+	// Update the last commit ID? -- Do we need it as a variable?, replicate the data in log and lastAppliedIndex
 	// return response to the client
 	return nil
 }
@@ -109,8 +115,15 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 // Update lastheardfromleader time
 // If possible update the timeout time for leader election
 // ...
-func (t *Task) AppendEntries(lastTermId int, lastIndexId int, commitId int, keyvaluepair KeyValuePair) error {
+// if leaderid != leaderID, change the leaderID index maintained on this server
+// entries argument empty for heartbeat
+// TODO: @Swati
+func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, prevLogTerm int, entries []KeyValuePair, leaderCommitIndex int, currentTerm *int, success *bool) error {
 	// if leaderCommitIndex > commitIndex on server, apply the commits to the log file (should only be done after replication and logMatching is successful)
+	// if currentTerm > leaderTerm, return false
+	// if term at server log prevLogIndex != prevLogTerm, return false
+	// if matched, then delete all entries after prevLogIndex, and add the new entries.
+	// Update commitIndex = min(last index in log, leaderCommitIndex)
 	return nil
 }
 
@@ -156,10 +169,21 @@ Receives election result:
 - voteGranted?: bool
 
 */
+
 func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex int, lastLogTerm int, currentTerm *int, voteGranted *bool) error {
 	// Reply false if candidateTerm < currentTerm : TODO: should this be < or <=
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
-	// also update the currentTerm to the newly voted term
+	// also update the currentTerm to the newly voted term and update the votedFor
+	return nil
+}
+
+func sendLeaderHeartbeats() error {
+	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
+	return nil
+}
+
+func applyCommittedEntries() error {
+	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	return nil
 }
 
@@ -171,14 +195,15 @@ func LeaderElection() error {
 	// probably need to extend the sleep/waiting time everytime lastHeartbeatfromleader is received (variable value can change in AppendEntries)
 
 	// For leaderElection: Increment currentTerm
-	//Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
+	// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
 	// If majority true response received, change leaderIndex = serverIndex
 	// Also reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
+	// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
 	// if receiver's term is greater then, currentTerm is returned, update your current term and continue
 	return nil
 }
 
-// Call from LeaderElection?
+// Call from LeaderElection? -- Not sure if we are using this
 func CheckConsistencySafety() error {
 	return nil
 }
@@ -186,7 +211,8 @@ func CheckConsistencySafety() error {
 // Called from PutKey, Also during heartbeat from leader every leaderHeartBeatDuration
 // 2. Send AppendEntries to all other servers in async
 // 3. When majority response received, add to the server file
-// 4. If AppendEntries fail, need to update the lastMatchedLogIndex for that server
+// 4. If AppendEntries fail, need to update the lastMatchedLogIndex for that server and retry. this keeps retrying unless successful
+// TODO: @Geetika
 func LogReplication() error {
 	return nil
 }
@@ -218,6 +244,7 @@ func Init(index int) error {
 	}
 
 	// TODO: call leader election function asynchronously so that it's non blocking
+	// call applyCommittedEntries asynchronously so that it keeps running in the background
 	return nil
 }
 
