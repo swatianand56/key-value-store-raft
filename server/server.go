@@ -10,6 +10,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -17,11 +18,8 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
+	"strings"
 )
-
-// Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- not sure if we need this
-//var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
-//var currentTerm int
 
 const numServers = 3
 
@@ -34,20 +32,31 @@ var config = []map[string]string{
 		"host":     "localhost",
 		"filename": "./0.txt",
 		"logfile":  "./log-0.txt",
+		"metadata": "./metadata-0.txt",
 	},
 	{
 		"port":     "8002",
 		"host":     "localhost",
 		"filename": "./1.txt",
 		"logfile":  "./log-1.txt",
+		"metadata": "./metadata-1.txt",
 	},
 	{
 		"port":     "8003",
 		"host":     "localhost",
 		"filename": "./2.txt",
 		"logfile":  "./log-2.txt",
+		"metadata": "./metadata-2.txt",
 	},
 }
+
+// Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- using a separate metadata file for this
+//var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
+//var currentTerm int (Also maintaining it in volatile memory to avoid Disk IO everytime)
+
+var serverCurrentTerm int // start value could be 0 (init from persistent storage during start)
+
+var serverVotedFor int // start value could be -1 (init from persistent storage during start)
 
 var serverIndex int
 
@@ -57,6 +66,9 @@ var leaderIndex int
 var commitIndex int
 
 var lastAppliedIndex int
+
+// init from persistent storage on start
+var lastLogEntryIndex int
 
 // Convert to epoch timestamp in ms
 var lastHeartbeatFromLeader int
@@ -74,19 +86,20 @@ var timeoutMax = 200
 var leaderElectionTimeout int
 var leaderHeartBeatDuration = 10
 
-// This entry goes in the log file
+//LogEntry ... This entry goes in the log file
 type LogEntry struct {
-	Key, Value, termId, indexId string
+	Key, Value, TermID, IndexID string
 }
 
-// This entry goes in the state machine on commit
+//KeyValuePair ... This entry goes in the state machine on commit
 type KeyValuePair struct {
 	Key, Value string
 }
 
+//Task ... type Task to be using in the context of RPC messages
 type Task int
 
-// ... Leader only servers this request always
+//GetKey ... Leader only servers this request always
 // If this server not the leader, redirect the request to the leader (How can client library know who the leader is?)
 func (t *Task) GetKey(key string, value *string) error {
 	// read the value of the key from the file and return
@@ -115,15 +128,76 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 // Update lastheardfromleader time
 // If possible update the timeout time for leader election
 // ...
-// if leaderid != leaderID, change the leaderID index maintained on this server
+// if leaderIndex != leaderID, change the leaderID index maintained on this server
 // entries argument empty for heartbeat
 // TODO: @Swati
-func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, prevLogTerm int, entries []KeyValuePair, leaderCommitIndex int, currentTerm *int, success *bool) error {
+func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommitIndex int, currentTerm *int, success *bool) error {
 	// if leaderCommitIndex > commitIndex on server, apply the commits to the log file (should only be done after replication and logMatching is successful)
 	// if currentTerm > leaderTerm, return false
 	// if term at server log prevLogIndex != prevLogTerm, return false
 	// if matched, then delete all entries after prevLogIndex, and add the new entries.
 	// Update commitIndex = min(last index in log, leaderCommitIndex)
+
+	// read the current term and serverVotedFor from the log file (only have to read the first 2 lines)
+	// also read the last line of the logfile to see what the last log index is
+
+	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
+
+	metadataFile := config[serverIndex]["metadata"]
+	logFile := config[serverIndex]["logfile"]
+
+	// heartbeat
+	if len(entries) == 0 {
+		leaderIndex = leaderID
+		commitIndex = int(math.Min(float64(leaderCommitIndex), float64(lastLogEntryIndex)))
+		if leaderTerm > serverCurrentTerm {
+			*currentTerm = leaderTerm
+			serverVotedFor = -1
+			lines := [2]string{strconv.Itoa(leaderTerm), "-1"}
+			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
+			if err != nil {
+				fmt.Println("Unable to write the new metadata information", err)
+				return err
+			}
+		}
+		return nil
+	}
+
+	// return false if recipient's term > leader's term
+	if serverCurrentTerm > leaderTerm {
+		*currentTerm = serverCurrentTerm
+		*success = false
+		return nil
+	}
+
+	fileContent, err := ioutil.ReadFile(logFile)
+	if err != nil {
+		fmt.Println("Unable to read the log file", err)
+		return err
+	}
+
+	lines := strings.Split(string(fileContent), "\n")
+
+	for i := len(lines) - 1; i >= 0; i++ {
+		line := strings.Split(lines[i], ",")
+		logIndex, _ := strconv.Atoi(line[3])
+		termIndex, _ := strconv.Atoi(line[2])
+		if (logIndex == prevLogIndex && termIndex != prevLogTerm) || logIndex < prevLogIndex {
+			*success = false
+			*currentTerm = leaderTerm
+			return nil
+		}
+	}
+
+	err = LogReplication(entries)
+	if err != nil {
+		fmt.Println("Unable to replicate the log in appendEntries", err)
+		return err
+	}
+
+	commitIndex = int(math.Min(float64(leaderCommitIndex), float64(lastLogEntryIndex)))
+	*success = true
+	*currentTerm = leaderTerm
 	return nil
 }
 
@@ -212,8 +286,10 @@ func CheckConsistencySafety() error {
 // 2. Send AppendEntries to all other servers in async
 // 3. When majority response received, add to the server file
 // 4. If AppendEntries fail, need to update the lastMatchedLogIndex for that server and retry. this keeps retrying unless successful
+// Also update the lastLogEntryIndex, commitIndex updated in appendentries
 // TODO: @Geetika
-func LogReplication() error {
+// Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
+func LogReplication(entries []LogEntry) error {
 	return nil
 }
 
@@ -251,7 +327,7 @@ func Init(index int) error {
 func main() {
 	args := os.Args[1:]
 	serverIndex, _ = strconv.Atoi(args[0])
-	// TODO: initialize the leaderElectionTimeout time randomly selected between timeoutmin and timeoutmax
+	// TODO: initialize the leaderElectionTimeout time randomly selected between timeoutmin and timeoutmax, initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
 	pid := os.Getpid()
 	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
 	filename := config[serverIndex]["filename"]
