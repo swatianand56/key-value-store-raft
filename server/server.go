@@ -9,6 +9,8 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -63,7 +65,7 @@ var serverIndex int
 
 var leaderIndex int
 
-// index of the last committed entry
+// DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
 var commitIndex int
 
 var lastAppliedIndex int
@@ -109,6 +111,7 @@ type Server struct {
 }
 
 //LogEntry ... This entry goes in the log file
+// get operations are denoted by using blank value
 type LogEntry struct {
 	Key, Value, TermID, IndexID string
 }
@@ -135,9 +138,59 @@ type Task int
 //GetKey ... Leader only servers this request always
 // If this server not the leader, redirect the request to the leader (How can client library know who the leader is?)
 func (t *Task) GetKey(key string, value *string) error {
-	// read the value of the key from the file and return
-	// do log replication and commit on get entries to get the most consistent response in case of leader failure
-	return nil
+	if serverIndex == leaderIndex {
+		// read the value of the key from the file and return
+		// do log replication and commit on get entries to get the most consistent response in case of leader failure
+
+		// first add the entry to the log of the leader, then call logReplication, it returns when replicated to majority
+		// once returned by logreplication, commit to file and return success, also update the commitIndex and lastappliedindex
+		logentrystr := string("\n" + key + ",," + strconv.Itoa(serverCurrentTerm) + strconv.Itoa(lastLogEntryIndex+1))
+		file, err := os.OpenFile(config[serverIndex]["logfile"], os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			fmt.Println("Unable to open the leader log file", err)
+			return err
+		}
+		defer file.Close()
+
+		if _, err = file.WriteString(logentrystr); err != nil {
+			fmt.Println("Unable to write the get entry to the leader log file", err)
+			return err
+		}
+		lastLogEntryIndex = lastLogEntryIndex + 1
+		logentry := []LogEntry{LogEntry{Key: key, Value: "", TermID: strconv.Itoa(serverCurrentTerm), IndexID: strconv.Itoa(lastLogEntryIndex)}}
+		err = LogReplication(logentry)
+		if err != nil {
+			fmt.Println("Unable to replicate the get request to a majority of servers", err)
+			return err
+		}
+		// if successful, apply log entry to the file (fetch the value of the key from the file for get)
+		commitIndex = lastLogEntryIndex + 1
+		lastAppliedIndex = commitIndex
+		// fetch the value of the key
+
+		file, err = os.Open(config[serverIndex]["filename"])
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			var line []string = strings.Split(scanner.Text(), ",")
+			if line[0] == key {
+				*value = line[1]
+				return nil
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Println("GetKey: Error while reading the file to find key value ", err)
+			return err
+		}
+		return nil
+	}
+	// cannot find a way to transfer connection to another server, so throwing error with leaderIndex
+	return errors.New("LeaderIndex:" + strconv.Itoa(leaderIndex))
 }
 
 //PutKey ...
@@ -226,6 +279,7 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		}
 	}
 
+	// this has to be changed, just add all entries to the log here and done, no need to call LogReplication function
 	err = LogReplication(args.entries)
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
