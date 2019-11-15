@@ -86,6 +86,27 @@ var timeoutMax = 200
 var leaderElectionTimeout int
 var leaderHeartBeatDuration = 10
 
+type RaftServer struct {
+	id, currentTerm, electionMinTime, electionMaxTime int
+	lastMessageTime                                   int64
+	cluster                                           []Server
+	log                                               []Term
+}
+
+type Term struct {
+	log    []Entry
+	termId int
+}
+
+type Entry struct {
+	Key, Value []string
+}
+
+type Server struct {
+	id, port int
+	ip       []byte
+}
+
 //LogEntry ... This entry goes in the log file
 type LogEntry struct {
 	Key, Value, TermID, IndexID string
