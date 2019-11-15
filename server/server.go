@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const numServers = 3
@@ -71,7 +72,7 @@ var lastAppliedIndex int
 var lastLogEntryIndex int
 
 // Convert to epoch timestamp in ms
-var lastHeartbeatFromLeader int
+var lastHeartbeatFromLeader int64
 
 // this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
 var nextIndex [numServers]int // would be init in leader election
@@ -117,6 +118,17 @@ type KeyValuePair struct {
 	Key, Value string
 }
 
+type AppendEntriesArgs struct {
+	leaderTerm, leaderID, prevLogIndex, prevLogTerm int
+	entries                                         []LogEntry
+	leaderCommitIndex                               int
+}
+
+type AppendEntriesReturn struct {
+	currentTerm int
+	success     bool
+}
+
 //Task ... type Task to be using in the context of RPC messages
 type Task int
 
@@ -152,7 +164,8 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 // if leaderIndex != leaderID, change the leaderID index maintained on this server
 // entries argument empty for heartbeat
 // TODO: @Swati
-func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommitIndex int, currentTerm *int, success *bool) error {
+// func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommitIndex int, currentTerm *int, success *bool) error {
+func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn) error {
 	// if leaderCommitIndex > commitIndex on server, apply the commits to the log file (should only be done after replication and logMatching is successful)
 	// if currentTerm > leaderTerm, return false
 	// if term at server log prevLogIndex != prevLogTerm, return false
@@ -166,15 +179,16 @@ func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, pre
 
 	metadataFile := config[serverIndex]["metadata"]
 	logFile := config[serverIndex]["logfile"]
+	lastHeartbeatFromLeader = time.Now().UnixNano()
 
 	// heartbeat
-	if len(entries) == 0 {
-		leaderIndex = leaderID
-		commitIndex = int(math.Min(float64(leaderCommitIndex), float64(lastLogEntryIndex)))
-		if leaderTerm > serverCurrentTerm {
-			*currentTerm = leaderTerm
+	if len(args.entries) == 0 {
+		commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(lastLogEntryIndex)))
+		if args.leaderTerm > serverCurrentTerm {
+			leaderIndex = args.leaderID
+			reply.currentTerm = args.leaderTerm
 			serverVotedFor = -1
-			lines := [2]string{strconv.Itoa(leaderTerm), "-1"}
+			lines := [2]string{strconv.Itoa(args.leaderTerm), "-1"}
 			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
 			if err != nil {
 				fmt.Println("Unable to write the new metadata information", err)
@@ -185,11 +199,13 @@ func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, pre
 	}
 
 	// return false if recipient's term > leader's term
-	if serverCurrentTerm > leaderTerm {
-		*currentTerm = serverCurrentTerm
-		*success = false
+	if serverCurrentTerm > args.leaderTerm {
+		reply.currentTerm = serverCurrentTerm
+		reply.success = false
 		return nil
 	}
+
+	leaderIndex = args.leaderID
 
 	fileContent, err := ioutil.ReadFile(logFile)
 	if err != nil {
@@ -199,26 +215,26 @@ func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, pre
 
 	lines := strings.Split(string(fileContent), "\n")
 
-	for i := len(lines) - 1; i >= 0; i++ {
+	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.Split(lines[i], ",")
 		logIndex, _ := strconv.Atoi(line[3])
 		termIndex, _ := strconv.Atoi(line[2])
-		if (logIndex == prevLogIndex && termIndex != prevLogTerm) || logIndex < prevLogIndex {
-			*success = false
-			*currentTerm = leaderTerm
+		if (logIndex == args.prevLogIndex && termIndex != args.prevLogTerm) || logIndex < args.prevLogIndex {
+			reply.success = false
+			reply.currentTerm = args.leaderTerm
 			return nil
 		}
 	}
 
-	err = LogReplication(entries)
+	err = LogReplication(args.entries)
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		return err
 	}
 
-	commitIndex = int(math.Min(float64(leaderCommitIndex), float64(lastLogEntryIndex)))
-	*success = true
-	*currentTerm = leaderTerm
+	commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(lastLogEntryIndex)))
+	reply.success = true
+	reply.currentTerm = args.leaderTerm
 	return nil
 }
 
@@ -272,9 +288,31 @@ func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex i
 	return nil
 }
 
+// when calling this method use the go func format? -- this would launch it on a separate thread -- not sure how this would be different from the normal operation though (can experiment)
 func sendLeaderHeartbeats() error {
 	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
-	return nil
+	for {
+		if serverIndex == leaderIndex {
+			for i := 0; i < len(config); i++ {
+				if i != serverIndex {
+					// send appendentries heartbeat rpc in async and no need to wait for response
+					client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
+					if err != nil {
+						fmt.Println("Leader unable to create connection with another server ", err)
+					} else {
+						defer client.Close()
+						// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
+						client.Go("Task.AppendEntries", AppendEntriesArgs{leaderTerm: serverCurrentTerm, leaderID: serverIndex,
+							prevLogIndex: -1, prevLogTerm: -1, entries: nil, leaderCommitIndex: lastAppliedIndex},
+							&AppendEntriesReturn{currentTerm: serverCurrentTerm, success: true}, nil)
+					}
+				}
+			}
+		} else {
+			return nil
+		}
+		time.Sleep(time.Duration(leaderHeartBeatDuration) * time.Millisecond)
+	}
 }
 
 func applyCommittedEntries() error {
