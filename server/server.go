@@ -402,7 +402,93 @@ func CheckConsistencySafety() error {
 // Also update the lastLogEntryIndex, commitIndex updated in appendentries
 // TODO: @Geetika
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
-func LogReplication(entries []LogEntry) error {
+// I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
+func LogReplication() error {
+	filePath := config[leaderIndex]["filename"]
+	for index := range config {
+		if index != leaderIndex {
+
+			var logEntries []LogEntry
+
+			// prepare logs to send
+			fileContent, err := ioutil.ReadFile(filePath)
+			logs = strings.Split(string(fileContent), "\n")
+			for j := nextIndex[index]; j < len(logs); j++ {
+				logEntries = append(logEntries, logs[j])
+			}
+
+			prevlogIndex := nextIndex[index] - 1
+			prevlogTerm := strings.Split(logs[prevlogIndex], ",")[2]
+
+			go func(server int, filePath string) {
+				appendEntriesArgs := &AppendEntriesArgs {
+					leaderTerm: serverCurrentTerm,
+					leaderID: leaderIndex,
+					prevLogIndex : prevlogIndex,
+					prevLogTerm: , prevlogTerm
+					entries: logEntries,
+					LeaderCommit: commitIndex,
+				}
+
+				var appendEntriesReturn AppendEntriesReturn
+
+				client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
+				if err != nil {
+					fmt.Printf("%s ", err)
+					return err
+				} else {
+					defer client.Close()
+
+					err := client.Call("Task.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
+					if err == nil {
+						if appendEntriesReturn.success {
+							matchIndex[server] = prevlogIndex + len(LogEntry)
+							nextIndex[server] = matchIndex[server] + 1
+						} else {
+							if appendEntriesReturn.currentTerm > serverCurrentTerm {
+								leaderIndex = server // if current term of the server is greater than leader term, the current leader will become the follower.
+								// Doubt: though this might not save the actual leader index.
+							} else {
+								nextIndex[server] = nextIndex[server] - 1
+
+								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
+							}
+						}
+					} else {
+						fmt.Printf("%s ", err)
+						return err
+					}
+
+					fileContent, err := ioutil.ReadFile(filePath)
+
+					if err != nil {
+						fmt.Println(err)
+						return err
+					}
+
+					logs := strings.Split(string(fileContent), "\n")
+
+					for N := len(logs) - 1; N > commitIndex; N-- {
+						log := strings.Split(logs[i], ",")
+						count := 0
+						if log[2] == serverCurrentTerm {
+							for i := range config {
+								if i != leaderIndex {
+									if matchIndex[i] >= N {
+										count++
+									}
+								}
+							}
+						}
+						if count >= majoritySize {
+							commitIndex = N
+							break
+						}
+					}
+				}
+			} (index, filePath)
+		}
+	}
 	return nil
 }
 
