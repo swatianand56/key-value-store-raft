@@ -374,27 +374,44 @@ func applyCommittedEntries() error {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	serverFileName = config[serverIndex]["filename"]
 	logFileName = config[serverIndex]["logFile"]
-	for {
-		if lastAppliedIndex < commitIndex {
-			lastAppliedIndex += 1
+	go func() { // running this over a separate thread for indefinite time
+		for {
+			if lastAppliedIndex < commitIndex {
+				lastAppliedIndex += 1
 
-			fileContent, err := ioutil.ReadFile(logFileName)
-			logs = strings.Split(string(fileContent), "\n")
-			log = logs[lastAppliedIndex];
-			value = strings.Split(log, ",")[1]
+				fileContent, err := ioutil.ReadFile(logFileName)
+				logs = strings.Split(string(fileContent), "\n")
+				log = logs[lastAppliedIndex];
+				value = strings.Split(log, ",")[1]
 
-			if value != "" {
-				fileContent, err := ioutil.ReadFile(serverFileName)
-				lines = strings.Split(string(fileContent), "\n")
-				lines = append(lines, log)
-				newFileContent := strings.Join(lines[:], "\n")
-				err = ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
+				// Add/update key value pair to the server if it is only a put request
+				if value != "" {
+					fileContent, err := ioutil.ReadFile(serverFileName)
+					lines = strings.Split(string(fileContent), "\n")
+
+					keyFound := false
+					for i := 1; i < len(lines); i++ {
+						line := strings.Split(lines[i], ",")
+						if line[0] == log[0] {
+							lines[i] = log
+							keyFound = true
+							break
+						}
+					}
+
+					if !keyFound {
+						lines = append(lines, log)
+					}
+
+					newFileContent := strings.Join(lines[:], "\n")
+					err = ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
+				}
+			} else {
+				time.Sleep(100 * time.Millisecond) // check after every 100ms
 			}
-		} else {
-			time.Sleep(100 * time.Millisecond) // check after every 100ms
 		}
-	}
-	return nil
+		return nil
+	}()
 }
 
 // candidate election, request vote
