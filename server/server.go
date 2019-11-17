@@ -369,8 +369,31 @@ func sendLeaderHeartbeats() error {
 	}
 }
 
+// TODO: @Geetika
 func applyCommittedEntries() error {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
+	serverFileName = config[serverIndex]["filename"]
+	logFileName = config[serverIndex]["logFile"]
+	for {
+		if lastAppliedIndex < commitIndex {
+			lastAppliedIndex += 1
+
+			fileContent, err := ioutil.ReadFile(logFileName)
+			logs = strings.Split(string(fileContent), "\n")
+			log = logs[lastAppliedIndex];
+			value = strings.Split(log, ",")[1]
+
+			if value != "" {
+				fileContent, err := ioutil.ReadFile(serverFileName)
+				lines = strings.Split(string(fileContent), "\n")
+				lines = append(lines, log)
+				newFileContent := strings.Join(lines[:], "\n")
+				err = ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
+			}
+		} else {
+			time.Sleep(100 * time.Millisecond) // check after every 100ms
+		}
+	}
 	return nil
 }
 
@@ -404,7 +427,7 @@ func CheckConsistencySafety() error {
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication() error {
-	filePath := config[leaderIndex]["filename"]
+	filePath := config[leaderIndex]["logFile"]
 	for index := range config {
 		if index != leaderIndex {
 
