@@ -144,31 +144,29 @@ func (t *Task) GetKey(key string, value *string) error {
 
 		// first add the entry to the log of the leader, then call logReplication, it returns when replicated to majority
 		// once returned by logreplication, commit to file and return success, also update the commitIndex and lastappliedindex
-		logentrystr := string("\n" + key + ",," + strconv.Itoa(serverCurrentTerm) + strconv.Itoa(lastLogEntryIndex+1))
-		file, err := os.OpenFile(config[serverIndex]["logfile"], os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
-			fmt.Println("Unable to open the leader log file", err)
-			return err
-		}
-		defer file.Close()
 
-		if _, err = file.WriteString(logentrystr); err != nil {
-			fmt.Println("Unable to write the get entry to the leader log file", err)
+		lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
+		logEntryIndex := lastLogEntryIndex // these 2 steps should be atomic
+
+		logentrystr := string("\n" + key + ",," + strconv.Itoa(serverCurrentTerm) + strconv.Itoa(logEntryIndex))
+		err := writeEntryToLogFile(logentrystr)
+		if err != nil {
 			return err
 		}
 		lastLogEntryIndex = lastLogEntryIndex + 1
-		logentry := []LogEntry{LogEntry{Key: key, Value: "", TermID: strconv.Itoa(serverCurrentTerm), IndexID: strconv.Itoa(lastLogEntryIndex)}}
+
+		logentry := []LogEntry{LogEntry{Key: key, Value: "", TermID: strconv.Itoa(serverCurrentTerm), IndexID: strconv.Itoa(logEntryIndex)}}
 		err = LogReplication(logentry)
 		if err != nil {
 			fmt.Println("Unable to replicate the get request to a majority of servers", err)
 			return err
 		}
 		// if successful, apply log entry to the file (fetch the value of the key from the file for get)
-		commitIndex = lastLogEntryIndex + 1
+		commitIndex = int(math.Max(float64(commitIndex), float64(logEntryIndex)))
 		lastAppliedIndex = commitIndex
 		// fetch the value of the key
 
-		file, err = os.Open(config[serverIndex]["filename"])
+		file, err := os.Open(config[serverIndex]["filename"])
 		if err != nil {
 			fmt.Println(err)
 			return err
@@ -204,6 +202,76 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	// Keep trying indefinitely unless the entry is replicated on all servers
 	// Update the last commit ID? -- Do we need it as a variable?, replicate the data in log and lastAppliedIndex
 	// return response to the client
+	if serverIndex == leaderIndex {
+		lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
+		logEntryIndex := lastLogEntryIndex // these 2 steps should be atomic
+
+		logentrystr := string("\n" + keyValue.Key + "," + keyValue.Value + "," + strconv.Itoa(serverCurrentTerm) + strconv.Itoa(logEntryIndex))
+		err := writeEntryToLogFile(logentrystr)
+		if err != nil {
+			return err
+		}
+		// what if failure happens, do we decrement the lastLogEntryIndex? what if another request has updated it already -- there might be a conflict here
+		logentry := []LogEntry{LogEntry{Key: keyValue.Key, Value: keyValue.Value, TermID: strconv.Itoa(serverCurrentTerm), IndexID: strconv.Itoa(logEntryIndex)}}
+		err = LogReplication(logentry)
+		if err != nil {
+			fmt.Println("Unable to replicate the get request to a majority of servers", err)
+			return err
+		}
+
+		// Written to log, now do the operation on the file (following write-ahead logging semantics)
+		keyFound := false
+		newKeyValueString := keyValue.Key + "," + keyValue.Value
+		filename := config[serverIndex]["filename"]
+		fileContent, err := ioutil.ReadFile(filename)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		lines := strings.Split(string(fileContent), "\n")
+
+		for i := 1; i < len(lines); i++ {
+			line := strings.Split(lines[i], ",")
+			if line[0] == keyValue.Key {
+				*oldValue = line[1]
+				lines[i] = newKeyValueString
+				keyFound = true
+				break
+			}
+		}
+
+		if !keyFound {
+			lines = append(lines, newKeyValueString)
+		}
+
+		newFileContent := strings.Join(lines[:], "\n")
+		err = ioutil.WriteFile(filename, []byte(newFileContent), 0)
+		if err != nil {
+			fmt.Printf("Unable to commit the entry to the server log file ", err)
+			return err
+		}
+
+		// Once it has been applied to the server file, we can set the commit index to the lastLogEntryIndex (should be kept here in the local variable to avoid conflicts with the parallel requests that might update it?)
+		commitIndex = int(math.Max(float64(commitIndex), float64(logEntryIndex)))
+		lastAppliedIndex = commitIndex
+
+		return nil
+	}
+	return errors.New("LeaderIndex:" + strconv.Itoa(leaderIndex))
+}
+
+func writeEntryToLogFile(entry string) error {
+	file, err := os.OpenFile(config[serverIndex]["logfile"], os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		fmt.Println("Unable to open the leader log file", err)
+		return err
+	}
+	defer file.Close()
+
+	if _, err = file.WriteString(entry); err != nil {
+		fmt.Println("Unable to write the get entry to the leader log file", err)
+		return err
+	}
 	return nil
 }
 
@@ -279,8 +347,11 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		}
 	}
 
-	// this has to be changed, just add all entries to the log here and done, no need to call LogReplication function
-	err = LogReplication(args.entries)
+	logentrystr := ""
+	for i := 0; i < len(args.entries); i++ {
+		logentrystr += string("\n" + args.entries[i].Key + "," + args.entries[i].Value + "," + args.entries[i].TermID + "," + args.entries[i].IndexID)
+	}
+	err = writeEntryToLogFile(logentrystr)
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		return err
@@ -372,22 +443,22 @@ func sendLeaderHeartbeats() error {
 // TODO: @Geetika
 func applyCommittedEntries() error {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
-	serverFileName = config[serverIndex]["filename"]
-	logFileName = config[serverIndex]["logFile"]
+	serverFileName := config[serverIndex]["filename"]
+	logFileName := config[serverIndex]["logFile"]
 	go func() { // running this over a separate thread for indefinite time
 		for {
 			if lastAppliedIndex < commitIndex {
-				lastAppliedIndex += 1
+				lastAppliedIndex++
 
 				fileContent, err := ioutil.ReadFile(logFileName)
-				logs = strings.Split(string(fileContent), "\n")
-				log = logs[lastAppliedIndex];
-				value = strings.Split(log, ",")[1]
+				logs := strings.Split(string(fileContent), "\n")
+				log := logs[lastAppliedIndex]
+				value := strings.Split(log, ",")[1]
 
 				// Add/update key value pair to the server if it is only a put request
 				if value != "" {
 					fileContent, err := ioutil.ReadFile(serverFileName)
-					lines = strings.Split(string(fileContent), "\n")
+					lines := strings.Split(string(fileContent), "\n")
 
 					keyFound := false
 					for i := 1; i < len(lines); i++ {
@@ -443,7 +514,7 @@ func CheckConsistencySafety() error {
 // TODO: @Geetika
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
-func LogReplication() error {
+func LogReplication(entry []LogEntry) error {
 	filePath := config[leaderIndex]["logFile"]
 	for index := range config {
 		if index != leaderIndex {
@@ -452,7 +523,7 @@ func LogReplication() error {
 
 			// prepare logs to send
 			fileContent, err := ioutil.ReadFile(filePath)
-			logs = strings.Split(string(fileContent), "\n")
+			logs := strings.Split(string(fileContent), "\n")
 			for j := nextIndex[index]; j < len(logs); j++ {
 				logEntries = append(logEntries, logs[j])
 			}
@@ -461,12 +532,12 @@ func LogReplication() error {
 			prevlogTerm := strings.Split(logs[prevlogIndex], ",")[2]
 
 			go func(server int, filePath string) {
-				appendEntriesArgs := &AppendEntriesArgs {
-					leaderTerm: serverCurrentTerm,
-					leaderID: leaderIndex,
-					prevLogIndex : prevlogIndex,
-					prevLogTerm: , prevlogTerm
-					entries: logEntries,
+				appendEntriesArgs := &AppendEntriesArgs{
+					leaderTerm:   serverCurrentTerm,
+					leaderID:     leaderIndex,
+					prevLogIndex: prevlogIndex,
+					prevLogTerm:  prevlogTerm,
+					entries:      logEntries,
 					LeaderCommit: commitIndex,
 				}
 
@@ -526,7 +597,7 @@ func LogReplication() error {
 						}
 					}
 				}
-			} (index, filePath)
+			}(index, filePath)
 		}
 	}
 	return nil
