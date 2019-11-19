@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -54,8 +55,8 @@ var config = []map[string]string{
 }
 
 // Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- using a separate metadata file for this
-//var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
-//var currentTerm int (Also maintaining it in volatile memory to avoid Disk IO everytime)
+// var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
+// var currentTerm int (Also maintaining it in volatile memory to avoid Disk IO everytime)
 
 var serverCurrentTerm int // start value could be 0 (init from persistent storage during start)
 
@@ -89,13 +90,24 @@ var timeoutMax = 200
 var leaderElectionTimeout int
 var leaderHeartBeatDuration = 10
 
+var me RaftServer
+
 type RaftServer struct {
-	id                               int
-	currentTerm                      int
-	electionMinTime, electionMaxTime int
-	lastMessageTime                  int64
-	cluster                          []Server
-	log                              []Term
+	// who am I?
+	id    int
+	alive bool
+
+	// when is it?
+	currentTerm     int
+	electionMinTime int
+	electionMaxTime int
+	lastMessageTime int64
+	lastNap         int
+	responses       []Vote
+
+	// log
+	cluster []Server
+	log     []Term
 }
 
 type Term struct {
@@ -110,6 +122,11 @@ type Entry struct {
 type Server struct {
 	id, port int
 	ip       []byte
+}
+
+type Vote struct {
+	source int
+	target int
 }
 
 //LogEntry ... This entry goes in the log file
@@ -488,18 +505,65 @@ func applyCommittedEntries() error {
 }
 
 // candidate election, request vote
+// TODO @nick
 func LeaderElection() error {
 	// make this func async
 	// in an infinite loop, check if currentTime - lastHeartbeatFromLeader > leaderElectionTimeout, initiate election
 	// sleep for leaderElectionTimeout
 	// probably need to extend the sleep/waiting time everytime lastHeartbeatfromleader is received (variable value can change in AppendEntries)
+	for alive {
+		var lastNap = rand.Intn(electionMaxTime-electionMinTime) + electionMinTime
 
-	// For leaderElection: Increment currentTerm
-	// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
-	// If majority true response received, change leaderIndex = serverIndex
-	// Also reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
-	// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
-	// if receiver's term is greater then, currentTerm is returned, update your current term and continue
+		var asleep = time.Now()
+		time.Sleep(lastNap)
+		var awake = time.Now()
+
+		// no election necessary if the last message was received after we went to sleep.
+		if me.lastMessageTime > asleep {
+			continue
+		}
+
+		/*
+		 * oy, it's election time!
+		 */
+		var electionTimeout = time.Now() + rand.Intn(electionMaxTime-electionMinTime) + electionMinTime
+		// For leaderElection: Increment currentTerm
+		me.currentTerm++
+
+		// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
+		// FIXME initialze responses: me.responses := make([]Vote, me.cluster.len)
+
+		for _, server := range servers {
+			if (server.id == me.id) || (time.Now() > electionTimeout) {
+				continue
+			}
+
+			go RequestVote(server)
+		}
+
+		for (me.responses < me.cluster.len) && (time.Now() > electionTimeout) {
+			sleep(min(100, time.Now()-electionTimeout/10)) // wait a ms...
+		}
+
+		var myVotes = 0
+		// If majority true response received, change leaderIndex = serverIndex
+		if me.responses == me.cluster.len {
+			for _, vote := range me.responses {
+				if vote.target == me.id {
+					myVotes++
+				}
+			}
+
+			if myVotes >= (me.cluster.len / 2) {
+				// TODO then I won the election.
+				// TODO Also reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
+				// TODO Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
+				// TODO if receiver's term is greater then, currentTerm is returned, update your current term and continue
+				return nil
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -654,4 +718,5 @@ func main() {
 	}
 
 	err = Init(serverIndex)
+	go LeaderElection()
 }
