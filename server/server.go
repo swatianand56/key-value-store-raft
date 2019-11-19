@@ -75,10 +75,12 @@ var leaderElectionTimeout int
 var leaderHeartBeatDuration = 10
 
 type RaftServer struct {
-	id, currentTerm, electionMinTime, electionMaxTime int
-	lastMessageTime                                   int64
-	cluster                                           []Server
-	log                                               []Term
+	id                               int
+	currentTerm                      int
+	electionMinTime, electionMaxTime int
+	lastMessageTime                  int64
+	cluster                          []Server
+	log                              []Term
 }
 
 type Term struct {
@@ -87,7 +89,7 @@ type Term struct {
 }
 
 type Entry struct {
-	Key, Value []string
+	key, value string
 }
 
 type Server struct {
