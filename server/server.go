@@ -153,10 +153,8 @@ func (t *Task) GetKey(key string, value *string) error {
 		if err != nil {
 			return err
 		}
-		lastLogEntryIndex = lastLogEntryIndex + 1
 
-		logentry := []LogEntry{LogEntry{Key: key, Value: "", TermID: strconv.Itoa(serverCurrentTerm), IndexID: strconv.Itoa(logEntryIndex)}}
-		err = LogReplication(logentry)
+		err = LogReplication()
 		if err != nil {
 			fmt.Println("Unable to replicate the get request to a majority of servers", err)
 			return err
@@ -212,8 +210,7 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 			return err
 		}
 		// what if failure happens, do we decrement the lastLogEntryIndex? what if another request has updated it already -- there might be a conflict here
-		logentry := []LogEntry{LogEntry{Key: keyValue.Key, Value: keyValue.Value, TermID: strconv.Itoa(serverCurrentTerm), IndexID: strconv.Itoa(logEntryIndex)}}
-		err = LogReplication(logentry)
+		err = LogReplication()
 		if err != nil {
 			fmt.Println("Unable to replicate the get request to a majority of servers", err)
 			return err
@@ -344,9 +341,12 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 			reply.success = false
 			reply.currentTerm = args.leaderTerm
 			return nil
+		} else if logIndex == args.prevLogIndex {
+			break
 		}
 	}
 
+	// TODO: remove all log entries after the matched logIndex
 	logentrystr := ""
 	for i := 0; i < len(args.entries); i++ {
 		logentrystr += string("\n" + args.entries[i].Key + "," + args.entries[i].Value + "," + args.entries[i].TermID + "," + args.entries[i].IndexID)
@@ -514,7 +514,7 @@ func CheckConsistencySafety() error {
 // TODO: @Geetika
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
-func LogReplication(entry []LogEntry) error {
+func LogReplication() error {
 	filePath := config[leaderIndex]["logFile"]
 	for index := range config {
 		if index != leaderIndex {
