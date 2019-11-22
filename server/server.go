@@ -445,8 +445,9 @@ func applyCommittedEntries() error {
 
 				fileContent, err := ioutil.ReadFile(logFileName)
 				logs := strings.Split(string(fileContent), "\n")
-				log := logs[lastAppliedIndex]
-				value := strings.Split(log, ",")[1]
+				currentLog := logs[lastAppliedIndex]
+				log := strings.Split(currentLog, ",")
+				value := log[1]
 
 				// Add/update key value pair to the server if it is only a put request
 				if value != "" {
@@ -457,14 +458,14 @@ func applyCommittedEntries() error {
 					for i := 1; i < len(lines); i++ {
 						line := strings.Split(lines[i], ",")
 						if line[0] == log[0] {
-							lines[i] = log
+							lines[i] = currentLog
 							keyFound = true
 							break
 						}
 					}
 
 					if !keyFound {
-						lines = append(lines, log)
+						lines = append(lines, currentLog)
 					}
 
 					newFileContent := strings.Join(lines[:], "\n")
@@ -474,8 +475,8 @@ func applyCommittedEntries() error {
 				time.Sleep(100 * time.Millisecond) // check after every 100ms
 			}
 		}
-		return nil
 	}()
+	return nil
 }
 
 // candidate election, request vote
