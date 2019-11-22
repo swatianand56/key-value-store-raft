@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -54,8 +55,8 @@ var config = []map[string]string{
 }
 
 // Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- using a separate metadata file for this
-//var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
-//var currentTerm int (Also maintaining it in volatile memory to avoid Disk IO everytime)
+// var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
+// var currentTerm int (Also maintaining it in volatile memory to avoid Disk IO everytime)
 
 var serverCurrentTerm int // start value could be 0 (init from persistent storage during start)
 
@@ -89,11 +90,27 @@ var timeoutMax = 200
 var leaderElectionTimeout int
 var leaderHeartBeatDuration = 10
 
+var me RaftServer
+
 type RaftServer struct {
-	id, currentTerm, electionMinTime, electionMaxTime int
-	lastMessageTime                                   int64
-	cluster                                           []Server
-	log                                               []Term
+	// who am I?
+	id    int
+	alive bool
+
+	// when is it?
+	currentTerm     int
+	lastMessageTime int64
+	responses       []Vote
+
+	// elections
+	lastVotedTerm   int
+	leader          int
+	electionMinTime int
+	electionMaxTime int
+
+	// log
+	cluster []Server
+	log     []Term
 }
 
 type Term struct {
@@ -102,12 +119,18 @@ type Term struct {
 }
 
 type Entry struct {
-	Key, Value []string
+	key, value string
 }
 
 type Server struct {
 	id, port int
 	ip       []byte
+}
+
+type Vote struct {
+	source  int
+	target  int
+	granted int
 }
 
 //LogEntry ... This entry goes in the log file
@@ -323,6 +346,12 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		return nil
 	}
 
+	// if a new leader asked us to join their cluster, do so.
+	if args.currentTerm >= serverCurrentTerm {
+		me.discardElectionCycle = true
+		me.currentTerm = args.currentTerm
+	}
+
 	leaderIndex = args.leaderID
 
 	fileContent, err := ioutil.ReadFile(logFile)
@@ -367,49 +396,13 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
 
-/*
-
-These data points are required by the server and requestvote:
-
-* Server:
-
-- selfId: int
-- currentTerm: int
-- lastMessageTime: time (ms)
-- electionMinTime: time (ms)
-- electionMaxTime: time (ms)
-
-- cluster: server[]
-- server: (id, ip, port)
-
-- log: term[]
-- term: (termId, entry[])
-- termId: int
-- entry: (entryId, data)
-- entryId: int
-
-* RequestVote RPC:
-
-"Plz vote for me as new leader!"
-
-Sends async RPC to all clients.
-
-- term := currentTerm
-- candidateId := selfId
-- lastLogTerm := log[-1].termId
-- lastLogIndex := log[-1][-1].entryId
-
-Receives election result:
-
-- term: new currentTerm, if bigger.
-- voteGranted?: bool
-
-*/
-
 func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex int, lastLogTerm int, currentTerm *int, voteGranted *bool) error {
 	// Reply false if candidateTerm < currentTerm : TODO: should this be < or <=
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
 	// also update the currentTerm to the newly voted term and update the votedFor
+
+	me.response = append(me.response, Vote{target: me.id, granted: true})
+
 	return nil
 }
 
@@ -491,13 +484,74 @@ func LeaderElection() error {
 	// in an infinite loop, check if currentTime - lastHeartbeatFromLeader > leaderElectionTimeout, initiate election
 	// sleep for leaderElectionTimeout
 	// probably need to extend the sleep/waiting time everytime lastHeartbeatfromleader is received (variable value can change in AppendEntries)
+	for me.alive {
+		me.discardElectionCycle = false
+		var lastNap = rand.Intn(electionMaxTime-electionMinTime) + electionMinTime
+		var asleep = time.Now()
+		time.Sleep(lastNap)
+		var awake = time.Now()
 
-	// For leaderElection: Increment currentTerm
-	// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
-	// If majority true response received, change leaderIndex = serverIndex
-	// Also reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
-	// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
-	// if receiver's term is greater then, currentTerm is returned, update your current term and continue
+		// no election necessary if the last message was received after we went to sleep.
+		if me.lastMessageTime > asleep {
+			continue
+		}
+
+		/*
+		 * oy, it's election time!
+		 */
+		var electionTimeout = time.Now() + rand.Intn(electionMaxTime-electionMinTime) + electionMinTime
+		// For leaderElection: Increment currentTerm
+		me.currentTerm++
+
+		// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
+		// forget the responses we've received so far.
+		me.responses = me.responses[:0]
+
+		for i, server := range me.cluster {
+			if (server.id == me.id) || (time.Now() > electionTimeout) {
+				continue
+			}
+
+			go RequestVote(server)
+		}
+
+		for (me.responses.len < me.cluster.len) && (time.Now() > electionTimeout) {
+			sleep(min(100, time.Now()-electionTimeout/10)) // wait a ms...
+		}
+
+		// if no leader was elected within the timeout, start a new election cycle
+		// or, if we somehow got more votes than the cluster contains, throw out the results.
+		if (me.responses.len < me.cluster.len && time.Now() > electionTimeout) || (me.responses.len > me.cluster.len) || me.discardElectionCycle {
+			continue
+		}
+
+		// enough votes were collected to tally.
+		var myVotes = 0
+		// If majority true response received, change leaderIndex = serverIndex
+		if me.responses == me.cluster.len {
+			for _, vote := range me.responses {
+				if (vote.target == me.id) && vote.granted {
+					myVotes++
+				}
+			}
+
+			// then I won the election.
+			if myVotes > (me.cluster.len / 2) {
+
+				// Reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
+				lastLogEntryIndex = 0
+
+				// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
+				for i, server := range me.cluster {
+					go sendLeaderHeartbeats()
+				}
+
+				// if receiver's term is greater then, currentTerm is returned, update your current term and continue: handled in AppendEntries, line 352.
+				return nil
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -651,5 +705,8 @@ func main() {
 		}
 	}
 
+	me := RaftServer{alive: true}
+	me.responses = make([]Vote, 10)
 	err = Init(serverIndex)
+	go LeaderElection()
 }
