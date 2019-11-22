@@ -27,7 +27,7 @@ import (
 
 const numServers = 3
 
-var majoritySize = math.Ceil(float64(numServers+1) / 2)
+var majoritySize = int(math.Ceil(float64(numServers+1) / 2))
 
 // Make this dynamic initialization based on numServers
 var config = []map[string]string{
@@ -103,10 +103,11 @@ type RaftServer struct {
 	responses       []Vote
 
 	// elections
-	lastVotedTerm   int
-	leader          int
-	electionMinTime int
-	electionMaxTime int
+	lastVotedTerm        int
+	leader               int
+	electionMinTime      int
+	electionMaxTime      int
+	discardElectionCycle bool
 
 	// log
 	cluster []Server
@@ -130,7 +131,7 @@ type Server struct {
 type Vote struct {
 	source  int
 	target  int
-	granted int
+	granted bool
 }
 
 //LogEntry ... This entry goes in the log file
@@ -320,7 +321,7 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 
 	metadataFile := config[serverIndex]["metadata"]
 	logFile := config[serverIndex]["logfile"]
-	lastHeartbeatFromLeader = time.Now().UnixNano()
+	me.lastMessageTime = time.Now().UnixNano()
 
 	// heartbeat
 	if len(args.entries) == 0 {
@@ -346,10 +347,10 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		return nil
 	}
 
-	// if a new leader asked us to join their cluster, do so.
-	if args.currentTerm >= serverCurrentTerm {
+	// if a new leader asked us to join their cluster, do so. (this is to stop leader election if this server is candidating an election)
+	if args.leaderTerm >= me.currentTerm {
 		me.discardElectionCycle = true
-		me.currentTerm = args.currentTerm
+		me.currentTerm = args.leaderTerm
 	}
 
 	leaderIndex = args.leaderID
@@ -401,7 +402,7 @@ func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex i
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
 	// also update the currentTerm to the newly voted term and update the votedFor
 
-	me.response = append(me.response, Vote{target: me.id, granted: true})
+	me.responses = append(me.responses, Vote{target: me.id, granted: true})
 
 	return nil
 }
@@ -443,7 +444,7 @@ func applyCommittedEntries() error {
 			if lastAppliedIndex < commitIndex {
 				lastAppliedIndex++
 
-				fileContent, err := ioutil.ReadFile(logFileName)
+				fileContent, _ := ioutil.ReadFile(logFileName)
 				logs := strings.Split(string(fileContent), "\n")
 				currentLog := logs[lastAppliedIndex]
 				log := strings.Split(currentLog, ",")
@@ -451,7 +452,7 @@ func applyCommittedEntries() error {
 
 				// Add/update key value pair to the server if it is only a put request
 				if value != "" {
-					fileContent, err := ioutil.ReadFile(serverFileName)
+					fileContent, _ := ioutil.ReadFile(serverFileName)
 					lines := strings.Split(string(fileContent), "\n")
 
 					keyFound := false
@@ -469,7 +470,10 @@ func applyCommittedEntries() error {
 					}
 
 					newFileContent := strings.Join(lines[:], "\n")
-					err = ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
+					err := ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
+					if err != nil {
+						fmt.Println("Unable to write to file in applyCommittedEntries", err)
+					}
 				}
 			} else {
 				time.Sleep(100 * time.Millisecond) // check after every 100ms
@@ -487,10 +491,9 @@ func LeaderElection() error {
 	// probably need to extend the sleep/waiting time everytime lastHeartbeatfromleader is received (variable value can change in AppendEntries)
 	for me.alive {
 		me.discardElectionCycle = false
-		var lastNap = rand.Intn(electionMaxTime-electionMinTime) + electionMinTime
-		var asleep = time.Now()
-		time.Sleep(lastNap)
-		var awake = time.Now()
+		var lastNap = rand.Intn(me.electionMaxTime-me.electionMinTime) + me.electionMinTime
+		var asleep = time.Now().UnixNano()
+		time.Sleep(time.Duration(lastNap) * time.Millisecond)
 
 		// no election necessary if the last message was received after we went to sleep.
 		if me.lastMessageTime > asleep {
@@ -500,7 +503,7 @@ func LeaderElection() error {
 		/*
 		 * oy, it's election time!
 		 */
-		var electionTimeout = time.Now() + rand.Intn(electionMaxTime-electionMinTime) + electionMinTime
+		var electionTimeout = (time.Now().UnixNano()) + int64(rand.Intn(me.electionMaxTime-me.electionMinTime)+me.electionMinTime)
 		// For leaderElection: Increment currentTerm
 		me.currentTerm++
 
@@ -508,28 +511,29 @@ func LeaderElection() error {
 		// forget the responses we've received so far.
 		me.responses = me.responses[:0]
 
-		for i, server := range me.cluster {
-			if (server.id == me.id) || (time.Now() > electionTimeout) {
+		for _, server := range me.cluster {
+			if (server.id == me.id) || ((time.Now().UnixNano()) > electionTimeout) {
 				continue
 			}
 
-			go RequestVote(server)
+			// TODO: Nick Daly (fix this)
+			// go RequestVote(server)
 		}
 
-		for (me.responses.len < me.cluster.len) && (time.Now() > electionTimeout) {
-			sleep(min(100, time.Now()-electionTimeout/10)) // wait a ms...
+		for (len(me.responses) < len(me.cluster)) && (time.Now().UnixNano() > electionTimeout) {
+			time.Sleep(time.Duration(int(math.Min(float64(100), float64(time.Now().UnixNano()-electionTimeout/10)))) * time.Millisecond) // wait a ms...
 		}
 
 		// if no leader was elected within the timeout, start a new election cycle
 		// or, if we somehow got more votes than the cluster contains, throw out the results.
-		if (me.responses.len < me.cluster.len && time.Now() > electionTimeout) || (me.responses.len > me.cluster.len) || me.discardElectionCycle {
+		if (len(me.responses) < len(me.cluster) && time.Now().UnixNano() > electionTimeout) || (len(me.responses) > len(me.cluster)) || me.discardElectionCycle {
 			continue
 		}
 
 		// enough votes were collected to tally.
 		var myVotes = 0
 		// If majority true response received, change leaderIndex = serverIndex
-		if me.responses == me.cluster.len {
+		if len(me.responses) == len(me.cluster) {
 			for _, vote := range me.responses {
 				if (vote.target == me.id) && vote.granted {
 					myVotes++
@@ -537,15 +541,13 @@ func LeaderElection() error {
 			}
 
 			// then I won the election.
-			if myVotes > (me.cluster.len / 2) {
+			if myVotes > (len(me.cluster) / 2) {
 
 				// Reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
 				lastLogEntryIndex = 0
 
 				// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
-				for i, server := range me.cluster {
-					go sendLeaderHeartbeats()
-				}
+				go sendLeaderHeartbeats()
 
 				// if receiver's term is greater then, currentTerm is returned, update your current term and continue: handled in AppendEntries, line 352.
 				return nil
@@ -577,23 +579,26 @@ func LogReplication() error {
 			var logEntries []LogEntry
 
 			// prepare logs to send
-			fileContent, err := ioutil.ReadFile(filePath)
+			fileContent, _ := ioutil.ReadFile(filePath)
 			logs := strings.Split(string(fileContent), "\n")
 			for j := nextIndex[index]; j < len(logs); j++ {
-				logEntries = append(logEntries, logs[j])
+				log := strings.Split(logs[j], ",")
+				le := LogEntry{Key: log[0], Value: log[1], TermID: log[2], IndexID: log[3]}
+				logEntries = append(logEntries, le)
 			}
 
 			prevlogIndex := nextIndex[index] - 1
 			prevlogTerm := strings.Split(logs[prevlogIndex], ",")[2]
 
 			go func(server int, filePath string) {
+				prevlogTermInt, err := strconv.Atoi(prevlogTerm)
 				appendEntriesArgs := &AppendEntriesArgs{
-					leaderTerm:   serverCurrentTerm,
-					leaderID:     leaderIndex,
-					prevLogIndex: prevlogIndex,
-					prevLogTerm:  prevlogTerm,
-					entries:      logEntries,
-					LeaderCommit: commitIndex,
+					leaderTerm:        serverCurrentTerm,
+					leaderID:          leaderIndex,
+					prevLogIndex:      prevlogIndex,
+					prevLogTerm:       prevlogTermInt,
+					entries:           logEntries,
+					leaderCommitIndex: commitIndex,
 				}
 
 				var appendEntriesReturn AppendEntriesReturn
@@ -601,14 +606,13 @@ func LogReplication() error {
 				client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
 				if err != nil {
 					fmt.Printf("%s ", err)
-					return err
 				} else {
 					defer client.Close()
 
 					err := client.Call("Task.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 					if err == nil {
 						if appendEntriesReturn.success {
-							matchIndex[server] = prevlogIndex + len(LogEntry)
+							matchIndex[server] = prevlogIndex + len(logEntries)
 							nextIndex[server] = matchIndex[server] + 1
 						} else {
 							if appendEntriesReturn.currentTerm > serverCurrentTerm {
@@ -622,22 +626,21 @@ func LogReplication() error {
 						}
 					} else {
 						fmt.Printf("%s ", err)
-						return err
 					}
 
 					fileContent, err := ioutil.ReadFile(filePath)
 
 					if err != nil {
 						fmt.Println(err)
-						return err
 					}
 
 					logs := strings.Split(string(fileContent), "\n")
 
 					for N := len(logs) - 1; N > commitIndex; N-- {
-						log := strings.Split(logs[i], ",")
+						log := strings.Split(logs[N], ",")
 						count := 0
-						if log[2] == serverCurrentTerm {
+						logTerm, _ := strconv.Atoi(log[2])
+						if logTerm == serverCurrentTerm {
 							for i := range config {
 								if i != leaderIndex {
 									if matchIndex[i] >= N {
