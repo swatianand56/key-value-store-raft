@@ -30,6 +30,7 @@ const numServers = 3
 var majoritySize = int(math.Ceil(float64(numServers+1) / 2))
 
 // Make this dynamic initialization based on numServers
+
 var config = []map[string]string{
 	{
 		"port":     "8001",
@@ -154,6 +155,18 @@ type AppendEntriesArgs struct {
 type AppendEntriesReturn struct {
 	currentTerm int
 	success     bool
+}
+
+type RequestVoteArgs struct {
+	candidateIndex int
+	candidateTerm  int
+	lastLogIndex   int
+	lastLogTerm    int
+}
+
+type RequestVoteResponse struct {
+	currentTerm int
+	voteGranted bool
 }
 
 //Task ... type Task to be using in the context of RPC messages
@@ -396,8 +409,7 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 // need to maintain what was the last term voted for
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
-
-func (t *Task) RequestVote(candidateIndex int, candidateTerm int, lastLogIndex int, lastLogTerm int, currentTerm *int, voteGranted *bool) error {
+func (t *Task) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
 	// Reply false if candidateTerm < currentTerm : TODO: should this be < or <=
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
 	// also update the currentTerm to the newly voted term and update the votedFor
@@ -435,52 +447,49 @@ func sendLeaderHeartbeats() error {
 }
 
 // TODO: @Geetika
-func applyCommittedEntries() error {
+func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	serverFileName := config[serverIndex]["filename"]
 	logFileName := config[serverIndex]["logFile"]
-	go func() { // running this over a separate thread for indefinite time
-		for {
-			if lastAppliedIndex < commitIndex {
-				lastAppliedIndex++
+	for {
+		if lastAppliedIndex < commitIndex {
+			lastAppliedIndex++
 
-				fileContent, _ := ioutil.ReadFile(logFileName)
-				logs := strings.Split(string(fileContent), "\n")
-				currentLog := logs[lastAppliedIndex]
-				log := strings.Split(currentLog, ",")
-				value := log[1]
+			fileContent, _ := ioutil.ReadFile(logFileName)
+			logs := strings.Split(string(fileContent), "\n")
+			currentLog := logs[lastAppliedIndex]
+			log := strings.Split(currentLog, ",")
+			value := log[1]
 
-				// Add/update key value pair to the server if it is only a put request
-				if value != "" {
-					fileContent, _ := ioutil.ReadFile(serverFileName)
-					lines := strings.Split(string(fileContent), "\n")
+			// Add/update key value pair to the server if it is only a put request
+			if value != "" {
+				fileContent, _ := ioutil.ReadFile(serverFileName)
+				lines := strings.Split(string(fileContent), "\n")
 
-					keyFound := false
-					for i := 1; i < len(lines); i++ {
-						line := strings.Split(lines[i], ",")
-						if line[0] == log[0] {
-							lines[i] = currentLog
-							keyFound = true
-							break
-						}
-					}
-
-					if !keyFound {
-						lines = append(lines, currentLog)
-					}
-
-					newFileContent := strings.Join(lines[:], "\n")
-					err := ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
-					if err != nil {
-						fmt.Println("Unable to write to file in applyCommittedEntries", err)
+				keyFound := false
+				for i := 1; i < len(lines); i++ {
+					line := strings.Split(lines[i], ",")
+					if line[0] == log[0] {
+						lines[i] = currentLog
+						keyFound = true
+						break
 					}
 				}
-			} else {
-				time.Sleep(100 * time.Millisecond) // check after every 100ms
+
+				if !keyFound {
+					lines = append(lines, currentLog)
+				}
+
+				newFileContent := strings.Join(lines[:], "\n")
+				err := ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
+				if err != nil {
+					fmt.Println("Unable to write to file in applyCommittedEntries", err)
+				}
 			}
+		} else {
+			time.Sleep(100 * time.Millisecond) // check after every 100ms
 		}
-	}()
-	return nil
+	}
 }
 
 // candidate election, request vote
@@ -665,7 +674,7 @@ func LogReplication() error {
 func Init(index int) error {
 	t := new(Task)
 
-	err := rpc.Register(&t)
+	err := rpc.Register(t)
 
 	if err != nil {
 		fmt.Println("Format of service Task isn't correct. ", err)
@@ -693,12 +702,16 @@ func Init(index int) error {
 }
 
 func main() {
+
 	args := os.Args[1:]
 	serverIndex, _ = strconv.Atoi(args[0])
 	// TODO: initialize the leaderElectionTimeout time randomly selected between timeoutmin and timeoutmax, initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
 	pid := os.Getpid()
 	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
 	filename := config[serverIndex]["filename"]
+	logFileName := config[serverIndex]["logfile"]
+	metadataFileName := config[serverIndex]["metadata"]
+
 	_, err := os.Stat(filename)
 
 	// TODO: Create server file and log file if not already present
@@ -709,8 +722,25 @@ func main() {
 		}
 	}
 
+	_, err = os.Stat(logFileName)
+	if os.IsNotExist(err) {
+		_, err := os.OpenFile(logFileName, os.O_CREATE, 0644)
+		if err != nil {
+			fmt.Println("Failed to create log file ", err)
+		}
+	}
+
+	_, err = os.Stat(metadataFileName)
+	if os.IsNotExist(err) {
+		_, err := os.OpenFile(metadataFileName, os.O_CREATE, 0644)
+		if err != nil {
+			fmt.Println("Failed to create meta data file ", err)
+		}
+	}
+
+	go LeaderElection()
+	go applyCommittedEntries() // running this over a separate thread for indefinite time
 	me := RaftServer{alive: true}
 	me.responses = make([]Vote, 10)
 	err = Init(serverIndex)
-	go LeaderElection()
 }
