@@ -678,8 +678,25 @@ func LogReplication() error {
 //Init ... takes in config and index of the current server in config
 func Init(index int) error {
 	t := new(Task)
-
 	err := rpc.Register(t)
+
+	me.serverIndex = index
+	me.leaderIndex = 0
+	me.alive = true
+	me.nextIndex[0] = 0
+	me.matchIndex[0] = 0
+	if me.serverIndex != me.leaderIndex {
+		fileContent, _ := ioutil.ReadFile(config[0]["logfile"])
+		lines := strings.Split(string(fileContent), "\n")
+		me.nextIndex[me.serverIndex] = len(lines) + 1
+		me.matchIndex[me.serverIndex] = 0
+	}
+
+	// TODO: call leader election function asynchronously so that it's non blocking
+	// call applyCommittedEntries asynchronously so that it keeps running in the background
+	// go LeaderElection()
+	// me.responses = make([]Vote, 10)
+	go applyCommittedEntries() // running this over a separate thread for indefinite time
 
 	if err != nil {
 		fmt.Println("Format of service Task isn't correct. ", err)
@@ -700,41 +717,27 @@ func Init(index int) error {
 	if err != nil {
 		fmt.Println("Error serving: ", err)
 	}
-
-	// TODO: call leader election function asynchronously so that it's non blocking
-	// call applyCommittedEntries asynchronously so that it keeps running in the background
 	return nil
 }
 
 func main() {
-
 	args := os.Args[1:]
-	me := RaftServer{alive: true}
-	me.serverIndex, _ = strconv.Atoi(args[0])
+	serverIndex, _ := strconv.Atoi(args[0])
+
 	// TODO: initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
 	pid := os.Getpid()
-	fmt.Printf("Server %d starts with process id: %d\n", me.serverIndex, pid)
-	filename := config[me.serverIndex]["filename"]
-	logFileName := config[me.serverIndex]["logfile"]
-	metadataFileName := config[me.serverIndex]["metadata"]
-	me.nextIndex[0] = 0
-	me.matchIndex[0] = 0
-
-	_, err := os.Stat(filename)
+	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
 
 	// TODO: Create server file and log file if not already present
+	filename := config[serverIndex]["filename"]
+	logFileName := config[serverIndex]["logfile"]
+	metadataFileName := config[serverIndex]["metadata"]
+
+	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
-		me.nextIndex[1] = 0
 		_, err := os.OpenFile(filename, os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Println("Failed to create file ", err)
-		}
-	} else {
-		if me.serverIndex != 0 {
-			fileContent, _ := ioutil.ReadFile(config[0]["logfile"])
-			lines := strings.Split(string(fileContent), "\n")
-			me.nextIndex[me.serverIndex] = len(lines) + 1
-			me.matchIndex[me.serverIndex] = 0
 		}
 	}
 
@@ -754,9 +757,5 @@ func main() {
 		}
 	}
 
-	go LeaderElection()
-	go applyCommittedEntries() // running this over a separate thread for indefinite time
-
-	me.responses = make([]Vote, 10)
-	err = Init(me.serverIndex)
+	err = Init(serverIndex)
 }
