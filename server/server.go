@@ -379,13 +379,17 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		}
 	}
 	fmt.Printf("8 \n")
-
-	// TODO: remove all log entries after the matched logIndex
-	logentrystr := ""
+	// TODO: remove all log entries from lines after the matched logIndex
+	// logentrystr := lines.Join("\n")
+	logsToAppend := []string{}
 	for i := 0; i < len(args.Entries); i++ {
-		logentrystr += string("\n" + args.Entries[i].Key + "," + args.Entries[i].Value + "," + args.Entries[i].TermID + "," + args.Entries[i].IndexID)
+		logsToAppend = append(logsToAppend, string(args.Entries[i].Key+","+args.Entries[i].Value+","+args.Entries[i].TermID+","+args.Entries[i].IndexID))
 	}
-	err = writeEntryToLogFile(logentrystr)
+	logsToAppendStr := strings.Join(logsToAppend, "\n")
+	if args.PrevLogIndex >= 0 {
+		logsToAppendStr = "\n" + logsToAppendStr
+	}
+	err = writeEntryToLogFile(logsToAppendStr)
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		return err
