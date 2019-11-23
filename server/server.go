@@ -149,9 +149,9 @@ type KeyValuePair struct {
 }
 
 type AppendEntriesArgs struct {
-	leaderTerm, leaderID, prevLogIndex, prevLogTerm int
-	entries                                         []LogEntry
-	leaderCommitIndex                               int
+	LeaderTerm, LeaderID, PrevLogIndex, PrevLogTerm int
+	Entries                                         []LogEntry
+	LeaderCommitIndex                               int
 }
 
 type AppendEntriesReturn struct {
@@ -187,7 +187,12 @@ func (t *Task) GetKey(key string, value *string) error {
 		lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
 		logEntryIndex := lastLogEntryIndex // these 2 steps should be atomic
 
-		logentrystr := string("\n" + key + ",," + strconv.Itoa(serverCurrentTerm) + strconv.Itoa(logEntryIndex))
+		logentrystr := string("\n" + key + ",," + strconv.Itoa(serverCurrentTerm) + "," + strconv.Itoa(logEntryIndex))
+
+		if logEntryIndex == 1 {
+			logentrystr = string(key + ",," + strconv.Itoa(serverCurrentTerm) + "," + strconv.Itoa(logEntryIndex))
+		}
+
 		err := writeEntryToLogFile(logentrystr)
 		if err != nil {
 			return err
@@ -244,7 +249,11 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
 		logEntryIndex := lastLogEntryIndex // these 2 steps should be atomic
 
-		logentrystr := string("\n" + keyValue.Key + "," + keyValue.Value + "," + strconv.Itoa(serverCurrentTerm) + strconv.Itoa(logEntryIndex))
+		logentrystr := string("\n" + keyValue.Key + "," + keyValue.Value + "," + strconv.Itoa(serverCurrentTerm) + "," + strconv.Itoa(logEntryIndex))
+		if logEntryIndex == 1 {
+			logentrystr = string(keyValue.Key + "," + keyValue.Value + "," + strconv.Itoa(serverCurrentTerm) + "," + strconv.Itoa(logEntryIndex))
+		}
+
 		err := writeEntryToLogFile(logentrystr)
 		if err != nil {
 			return err
@@ -265,7 +274,11 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 			fmt.Println(err)
 			return err
 		}
-		lines := strings.Split(string(fileContent), "\n")
+
+		lines := []string{}
+		if len(string(fileContent)) != 0 {
+			lines = strings.Split(string(fileContent), "\n")
+		}
 
 		for i := 1; i < len(lines); i++ {
 			line := strings.Split(lines[i], ",")
@@ -334,41 +347,52 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 
 	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
 
+	fmt.Printf("append entries calling \n")
+
 	metadataFile := config[serverIndex]["metadata"]
 	logFile := config[serverIndex]["logfile"]
 	me.lastMessageTime = time.Now().UnixNano()
 
+	fmt.Printf("1 \n")
+
 	// heartbeat
-	if len(args.entries) == 0 {
-		commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(lastLogEntryIndex)))
-		if args.leaderTerm > serverCurrentTerm {
-			leaderIndex = args.leaderID
-			reply.currentTerm = args.leaderTerm
+	if len(args.Entries) == 0 {
+		fmt.Printf("2 \n")
+		commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(lastLogEntryIndex)))
+		if args.LeaderTerm > serverCurrentTerm {
+			leaderIndex = args.LeaderID
+			reply.currentTerm = args.LeaderTerm
 			serverVotedFor = -1
-			lines := [2]string{strconv.Itoa(args.leaderTerm), "-1"}
+			lines := [2]string{strconv.Itoa(args.LeaderTerm), "-1"}
 			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
 			if err != nil {
 				fmt.Println("Unable to write the new metadata information", err)
 				return err
 			}
 		}
+		fmt.Printf("3 \n")
 		return nil
 	}
 
+	fmt.Printf("4 \n")
+
 	// return false if recipient's term > leader's term
-	if serverCurrentTerm > args.leaderTerm {
+	if serverCurrentTerm > args.LeaderTerm {
 		reply.currentTerm = serverCurrentTerm
 		reply.success = false
 		return nil
 	}
+	fmt.Printf("5 \n")
 
 	// if a new leader asked us to join their cluster, do so. (this is to stop leader election if this server is candidating an election)
-	if args.leaderTerm >= me.currentTerm {
+	if args.LeaderTerm >= me.currentTerm {
 		me.discardElectionCycle = true
-		me.currentTerm = args.leaderTerm
+		me.currentTerm = args.LeaderTerm
 	}
 
-	leaderIndex = args.leaderID
+	fmt.Printf("6 \n")
+
+	leaderIndex = args.LeaderID
 
 	fileContent, err := ioutil.ReadFile(logFile)
 	if err != nil {
@@ -376,35 +400,45 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		return err
 	}
 
-	lines := strings.Split(string(fileContent), "\n")
+	lines := []string{}
+	if len(string(fileContent)) != 0 {
+		lines = strings.Split(string(fileContent), "\n")
+	}
+
+	fmt.Printf("7 \n")
 
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.Split(lines[i], ",")
 		logIndex, _ := strconv.Atoi(line[3])
 		termIndex, _ := strconv.Atoi(line[2])
-		if (logIndex == args.prevLogIndex && termIndex != args.prevLogTerm) || logIndex < args.prevLogIndex {
+		if (logIndex == args.PrevLogIndex && termIndex != args.PrevLogTerm) || logIndex < args.PrevLogIndex {
 			reply.success = false
-			reply.currentTerm = args.leaderTerm
+			reply.currentTerm = args.LeaderTerm
 			return nil
-		} else if logIndex == args.prevLogIndex {
+		} else if logIndex == args.PrevLogIndex {
 			break
 		}
 	}
+	fmt.Printf("8 \n")
 
 	// TODO: remove all log entries after the matched logIndex
 	logentrystr := ""
-	for i := 0; i < len(args.entries); i++ {
-		logentrystr += string("\n" + args.entries[i].Key + "," + args.entries[i].Value + "," + args.entries[i].TermID + "," + args.entries[i].IndexID)
+	for i := 0; i < len(args.Entries); i++ {
+		logentrystr += string("\n" + args.Entries[i].Key + "," + args.Entries[i].Value + "," + args.Entries[i].TermID + "," + args.Entries[i].IndexID)
 	}
 	err = writeEntryToLogFile(logentrystr)
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		return err
 	}
+	fmt.Printf("9 \n")
 
-	commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(lastLogEntryIndex)))
+	commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(lastLogEntryIndex)))
 	reply.success = true
-	reply.currentTerm = args.leaderTerm
+	reply.currentTerm = args.LeaderTerm
+
+	fmt.Printf("append entries done \n")
+
 	return nil
 }
 
@@ -435,8 +469,8 @@ func sendLeaderHeartbeats() error {
 					} else {
 						defer client.Close()
 						// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
-						client.Go("Task.AppendEntries", AppendEntriesArgs{leaderTerm: serverCurrentTerm, leaderID: serverIndex,
-							prevLogIndex: -1, prevLogTerm: -1, entries: nil, leaderCommitIndex: lastAppliedIndex},
+						client.Go("Task.AppendEntries", AppendEntriesArgs{LeaderTerm: serverCurrentTerm, LeaderID: serverIndex,
+							PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: lastAppliedIndex},
 							&AppendEntriesReturn{currentTerm: serverCurrentTerm, success: true}, nil)
 					}
 				}
@@ -584,15 +618,20 @@ func CheckConsistencySafety() error {
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication() error {
 	fmt.Printf("LogReplication calling\n")
-	filePath := config[leaderIndex]["logFile"]
+	filePath := config[leaderIndex]["logfile"]
 	for index := range config {
 		if index != leaderIndex {
 
 			var logEntries []LogEntry
 
 			// prepare logs to send
-			fileContent, _ := ioutil.ReadFile(filePath)
+			fileContent, err := ioutil.ReadFile(filePath)
+			if err != nil {
+				fmt.Printf("error %s\n", err)
+			}
+
 			logs := strings.Split(string(fileContent), "\n")
+
 			for j := nextIndex[index]; j < len(logs); j++ {
 				log := strings.Split(logs[j], ",")
 				le := LogEntry{Key: log[0], Value: log[1], TermID: log[2], IndexID: log[3]}
@@ -600,77 +639,81 @@ func LogReplication() error {
 			}
 
 			prevlogIndex := nextIndex[index] - 1
-			prevlogTerm := strings.Split(logs[prevlogIndex], ",")[2]
+			prevlogTerm := "0"
+			if prevlogIndex != -1 {
+				prevlogTerm = strings.Split(logs[prevlogIndex], ",")[2]
+			}
 
-			go func(server int, filePath string) {
-				prevlogTermInt, err := strconv.Atoi(prevlogTerm)
-				appendEntriesArgs := &AppendEntriesArgs{
-					leaderTerm:        serverCurrentTerm,
-					leaderID:          leaderIndex,
-					prevLogIndex:      prevlogIndex,
-					prevLogTerm:       prevlogTermInt,
-					entries:           logEntries,
-					leaderCommitIndex: commitIndex,
+			server := index
+			// go func(server int, filePath string) {
+			prevlogTermInt, err := strconv.Atoi(prevlogTerm)
+			appendEntriesArgs := &AppendEntriesArgs{
+				LeaderTerm:        serverCurrentTerm,
+				LeaderID:          leaderIndex,
+				PrevLogIndex:      prevlogIndex,
+				PrevLogTerm:       prevlogTermInt,
+				Entries:           logEntries,
+				LeaderCommitIndex: commitIndex,
+			}
+
+			var appendEntriesReturn AppendEntriesReturn
+
+			client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
+			if err != nil {
+				fmt.Printf("%s ", err)
+			} else {
+				defer client.Close()
+
+				err := client.Call("Task.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
+				if err == nil {
+					if appendEntriesReturn.success {
+						matchIndex[server] = prevlogIndex + len(logEntries)
+						nextIndex[server] = matchIndex[server] + 1
+					} else {
+						if appendEntriesReturn.currentTerm > serverCurrentTerm {
+							leaderIndex = server // if current term of the server is greater than leader term, the current leader will become the follower.
+							// Doubt: though this might not save the actual leader index.
+						} else {
+							nextIndex[server] = nextIndex[server] - 1
+
+							// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
+						}
+					}
+				} else {
+					fmt.Printf("error from append entry \n")
+					fmt.Printf("%s ", err)
 				}
 
-				var appendEntriesReturn AppendEntriesReturn
+				fileContent, err := ioutil.ReadFile(filePath)
 
-				client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
 				if err != nil {
-					fmt.Printf("%s ", err)
-				} else {
-					defer client.Close()
+					fmt.Println(err)
+				}
 
-					err := client.Call("Task.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
-					if err == nil {
-						if appendEntriesReturn.success {
-							matchIndex[server] = prevlogIndex + len(logEntries)
-							nextIndex[server] = matchIndex[server] + 1
-						} else {
-							if appendEntriesReturn.currentTerm > serverCurrentTerm {
-								leaderIndex = server // if current term of the server is greater than leader term, the current leader will become the follower.
-								// Doubt: though this might not save the actual leader index.
-							} else {
-								nextIndex[server] = nextIndex[server] - 1
+				logs := strings.Split(string(fileContent), "\n")
 
-								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
-							}
-						}
-					} else {
-						fmt.Printf("%s ", err)
-					}
-
-					fileContent, err := ioutil.ReadFile(filePath)
-
-					if err != nil {
-						fmt.Println(err)
-					}
-
-					logs := strings.Split(string(fileContent), "\n")
-
-					for N := len(logs) - 1; N > commitIndex; N-- {
-						log := strings.Split(logs[N], ",")
-						count := 0
-						logTerm, _ := strconv.Atoi(log[2])
-						if logTerm == serverCurrentTerm {
-							for i := range config {
-								if i != leaderIndex {
-									if matchIndex[i] >= N {
-										count++
-									}
+				for N := len(logs) - 1; N > commitIndex; N-- {
+					log := strings.Split(logs[N], ",")
+					count := 0
+					logTerm, _ := strconv.Atoi(log[2])
+					if logTerm == serverCurrentTerm {
+						for i := range config {
+							if i != leaderIndex {
+								if matchIndex[i] >= N {
+									count++
 								}
 							}
 						}
-						if count >= majoritySize {
-							commitIndex = N
-							break
-						}
+					}
+					if count >= majoritySize {
+						commitIndex = N
+						break
 					}
 				}
-			}(index, filePath)
+			}
+			// }(index, filePath)
 		}
 	}
-	fmt.Printf("LogReplication done\n")
 	return nil
 }
 
@@ -715,14 +758,24 @@ func main() {
 	filename := config[serverIndex]["filename"]
 	logFileName := config[serverIndex]["logfile"]
 	metadataFileName := config[serverIndex]["metadata"]
+	nextIndex[0] = 0
+	matchIndex[0] = 0
 
 	_, err := os.Stat(filename)
 
 	// TODO: Create server file and log file if not already present
 	if os.IsNotExist(err) {
+		nextIndex[1] = 0
 		_, err := os.OpenFile(filename, os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Println("Failed to create file ", err)
+		}
+	} else {
+		if serverIndex != 0 {
+			fileContent, _ := ioutil.ReadFile(config[0]["logfile"])
+			lines := strings.Split(string(fileContent), "\n")
+			nextIndex[serverIndex] = len(lines) + 1
+			matchIndex[serverIndex] = 0
 		}
 	}
 
