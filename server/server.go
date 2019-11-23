@@ -62,27 +62,6 @@ var config = []map[string]string{
 // var me.currentTerm int // start value could be 0 (init from persistent storage during start)
 // var serverVotedFor int // start value could be -1 (init from persistent storage during start)
 
-// DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
-var commitIndex int
-
-var lastAppliedIndex int
-
-// init from persistent storage on start
-var lastLogEntryIndex int
-
-// this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
-var nextIndex [numServers]int // would be init in leader election
-
-// not sure where this is used -- but keeping it for now (initialize to 0)
-var matchIndex [numServers]int // would be init in leader election
-
-// Time in ms
-// May be check the timeout size effect on the overall system performance
-var timeoutMin = 50
-var timeoutMax = 200
-var leaderElectionTimeout int
-var leaderHeartBeatDuration = 10
-
 var me RaftServer
 
 type RaftServer struct {
@@ -91,34 +70,25 @@ type RaftServer struct {
 	alive       bool
 
 	// when is it?
-	currentTerm     int   // start value could be 0 (init from persistent storage during start)
-	serverVotedFor  int   // where is this even being used? -- TODO: check this, May be separate variable defined for this
-	lastMessageTime int64 // time in nanoseconds
-	responses       []Vote
+	currentTerm       int   // start value could be 0 (init from persistent storage during start)
+	serverVotedFor    int   // where is this even being used? -- TODO: check this, May be separate variable defined for this
+	lastMessageTime   int64 // time in nanoseconds
+	responses         []Vote
+	commitIndex       int // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
+	lastAppliedIndex  int
+	lastLogEntryIndex int //TODO: init from persistent storage on start
 
 	// elections
-	leaderIndex          int
-	electionMinTime      int
-	electionMaxTime      int
-	discardElectionCycle bool
+	leaderIndex             int
+	electionMinTime         int // time in nanoseconds // TODO: need to init this, May be check the timeout size effect on the overall system performance
+	electionMaxTime         int // time in nanoseconds
+	discardElectionCycle    bool
+	leaderHeartBeatDuration int // TODO: init this (time in millisecond)
 
-	// log
-	cluster []Server
-	log     []Term
-}
-
-type Term struct {
-	log    []Entry
-	termId int
-}
-
-type Entry struct {
-	key, value string
-}
-
-type Server struct {
-	id, port int
-	ip       []byte
+	// Log replication -- structures needed at leader
+	// would be init in leader election
+	nextIndex  [numServers]int // this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
+	matchIndex [numServers]int // not sure where this is used -- but keeping it for now (initialize to 0)
 }
 
 type Vote struct {
@@ -174,8 +144,8 @@ func (t *Task) GetKey(key string, value *string) error {
 		// first add the entry to the log of the leader, then call logReplication, it returns when replicated to majority
 		// once returned by logreplication, commit to file and return success, also update the commitIndex and lastappliedindex
 
-		lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
-		logEntryIndex := lastLogEntryIndex // these 2 steps should be atomic
+		me.lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
+		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		logentrystr := string("\n" + key + ",," + strconv.Itoa(me.currentTerm) + strconv.Itoa(logEntryIndex))
 		err := writeEntryToLogFile(logentrystr)
@@ -190,8 +160,8 @@ func (t *Task) GetKey(key string, value *string) error {
 		}
 
 		// if successful, apply log entry to the file (fetch the value of the key from the file for get)
-		commitIndex = int(math.Max(float64(commitIndex), float64(logEntryIndex)))
-		lastAppliedIndex = commitIndex
+		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
+		me.lastAppliedIndex = me.commitIndex
 		// fetch the value of the key
 
 		file, err := os.Open(config[me.serverIndex]["filename"])
@@ -231,8 +201,8 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	// Update the last commit ID? -- Do we need it as a variable?, replicate the data in log and lastAppliedIndex
 	// return response to the client
 	if me.serverIndex == me.leaderIndex {
-		lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
-		logEntryIndex := lastLogEntryIndex // these 2 steps should be atomic
+		me.lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
+		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		logentrystr := string("\n" + keyValue.Key + "," + keyValue.Value + "," + strconv.Itoa(me.currentTerm) + strconv.Itoa(logEntryIndex))
 		err := writeEntryToLogFile(logentrystr)
@@ -279,8 +249,8 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		}
 
 		// Once it has been applied to the server file, we can set the commit index to the lastLogEntryIndex (should be kept here in the local variable to avoid conflicts with the parallel requests that might update it?)
-		commitIndex = int(math.Max(float64(commitIndex), float64(logEntryIndex)))
-		lastAppliedIndex = commitIndex
+		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
+		me.lastAppliedIndex = me.commitIndex
 		return nil
 	}
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
@@ -330,7 +300,7 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 
 	// heartbeat
 	if len(args.entries) == 0 {
-		commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(lastLogEntryIndex)))
+		me.commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.leaderTerm > me.currentTerm {
 			me.leaderIndex = args.leaderID
 			reply.currentTerm = args.leaderTerm
@@ -392,7 +362,7 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		return err
 	}
 
-	commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(lastLogEntryIndex)))
+	me.commitIndex = int(math.Min(float64(args.leaderCommitIndex), float64(me.lastLogEntryIndex)))
 	reply.success = true
 	reply.currentTerm = args.leaderTerm
 	return nil
@@ -426,7 +396,7 @@ func sendLeaderHeartbeats() error {
 						defer client.Close()
 						// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
 						client.Go("Task.AppendEntries", AppendEntriesArgs{leaderTerm: me.currentTerm, leaderID: me.serverIndex,
-							prevLogIndex: -1, prevLogTerm: -1, entries: nil, leaderCommitIndex: lastAppliedIndex},
+							prevLogIndex: -1, prevLogTerm: -1, entries: nil, leaderCommitIndex: me.lastAppliedIndex},
 							&AppendEntriesReturn{currentTerm: me.currentTerm, success: true}, nil)
 					}
 				}
@@ -434,7 +404,7 @@ func sendLeaderHeartbeats() error {
 		} else {
 			return nil
 		}
-		time.Sleep(time.Duration(leaderHeartBeatDuration) * time.Millisecond)
+		time.Sleep(time.Duration(me.leaderHeartBeatDuration) * time.Millisecond)
 	}
 }
 
@@ -444,12 +414,12 @@ func applyCommittedEntries() {
 	serverFileName := config[me.serverIndex]["filename"]
 	logFileName := config[me.serverIndex]["logFile"]
 	for {
-		if lastAppliedIndex < commitIndex {
-			lastAppliedIndex++
+		if me.lastAppliedIndex < me.commitIndex {
+			me.lastAppliedIndex++
 
 			fileContent, _ := ioutil.ReadFile(logFileName)
 			logs := strings.Split(string(fileContent), "\n")
-			currentLog := logs[lastAppliedIndex]
+			currentLog := logs[me.lastAppliedIndex]
 			log := strings.Split(currentLog, ",")
 			value := log[1]
 
@@ -487,8 +457,8 @@ func applyCommittedEntries() {
 // candidate election, request vote
 func LeaderElection() error {
 	// make this func async
-	// in an infinite loop, check if currentTime - me.lastMessageTime > leaderElectionTimeout, initiate election
-	// sleep for leaderElectionTimeout
+	// in an infinite loop, check if currentTime - me.lastMessageTime > electionTimeout, initiate election
+	// sleep for electionTimeout
 	// probably need to extend the sleep/waiting time everytime me.lastMessageTime is received (variable value can change in AppendEntries)
 	for me.alive {
 		me.discardElectionCycle = false
@@ -512,8 +482,8 @@ func LeaderElection() error {
 		// forget the responses we've received so far.
 		me.responses = me.responses[:0]
 
-		for _, server := range me.cluster {
-			if (server.id == me.serverIndex) || ((time.Now().UnixNano()) > electionTimeout) {
+		for index := range config {
+			if (index == me.serverIndex) || ((time.Now().UnixNano()) > electionTimeout) {
 				continue
 			}
 
@@ -521,20 +491,20 @@ func LeaderElection() error {
 			// go RequestVote(server)
 		}
 
-		for (len(me.responses) < len(me.cluster)) && (time.Now().UnixNano() > electionTimeout) {
+		for (len(me.responses) < numServers) && (time.Now().UnixNano() > electionTimeout) {
 			time.Sleep(time.Duration(int(math.Min(float64(100), float64(time.Now().UnixNano()-electionTimeout/10)))) * time.Millisecond) // wait a ms...
 		}
 
 		// if no leader was elected within the timeout, start a new election cycle
 		// or, if we somehow got more votes than the cluster contains, throw out the results.
-		if (len(me.responses) < len(me.cluster) && time.Now().UnixNano() > electionTimeout) || (len(me.responses) > len(me.cluster)) || me.discardElectionCycle {
+		if (len(me.responses) < numServers && time.Now().UnixNano() > electionTimeout) || (len(me.responses) > numServers) || me.discardElectionCycle {
 			continue
 		}
 
 		// enough votes were collected to tally.
 		var myVotes = 0
 		// If majority true response received, change leaderIndex = serverIndex
-		if len(me.responses) == len(me.cluster) {
+		if len(me.responses) == numServers {
 			for _, vote := range me.responses {
 				if (vote.target == me.serverIndex) && vote.granted {
 					myVotes++
@@ -542,10 +512,10 @@ func LeaderElection() error {
 			}
 
 			// then I won the election.
-			if myVotes > (len(me.cluster) / 2) {
+			if myVotes > majoritySize {
 
 				// Reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
-				lastLogEntryIndex = 0
+				me.lastLogEntryIndex = 0 // TODO: WHAT??? -- This is probably an error -- Wrong variable used
 
 				// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
 				go sendLeaderHeartbeats()
@@ -583,13 +553,13 @@ func LogReplication() error {
 			// prepare logs to send
 			fileContent, _ := ioutil.ReadFile(filePath)
 			logs := strings.Split(string(fileContent), "\n")
-			for j := nextIndex[index]; j < len(logs); j++ {
+			for j := me.nextIndex[index]; j < len(logs); j++ {
 				log := strings.Split(logs[j], ",")
 				le := LogEntry{Key: log[0], Value: log[1], TermID: log[2], IndexID: log[3]}
 				logEntries = append(logEntries, le)
 			}
 
-			prevlogIndex := nextIndex[index] - 1
+			prevlogIndex := me.nextIndex[index] - 1
 			prevlogTerm := strings.Split(logs[prevlogIndex], ",")[2]
 
 			go func(server int, filePath string) {
@@ -600,7 +570,7 @@ func LogReplication() error {
 					prevLogIndex:      prevlogIndex,
 					prevLogTerm:       prevlogTermInt,
 					entries:           logEntries,
-					leaderCommitIndex: commitIndex,
+					leaderCommitIndex: me.commitIndex,
 				}
 
 				var appendEntriesReturn AppendEntriesReturn
@@ -614,14 +584,14 @@ func LogReplication() error {
 					err := client.Call("Task.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 					if err == nil {
 						if appendEntriesReturn.success {
-							matchIndex[server] = prevlogIndex + len(logEntries)
-							nextIndex[server] = matchIndex[server] + 1
+							me.matchIndex[server] = prevlogIndex + len(logEntries)
+							me.nextIndex[server] = me.matchIndex[server] + 1
 						} else {
 							if appendEntriesReturn.currentTerm > me.currentTerm {
 								me.leaderIndex = server // if current term of the server is greater than leader term, the current leader will become the follower.
 								// Doubt: though this might not save the actual leader index.
 							} else {
-								nextIndex[server] = nextIndex[server] - 1
+								me.nextIndex[server] = me.nextIndex[server] - 1
 
 								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
 							}
@@ -638,21 +608,21 @@ func LogReplication() error {
 
 					logs := strings.Split(string(fileContent), "\n")
 
-					for N := len(logs) - 1; N > commitIndex; N-- {
+					for N := len(logs) - 1; N > me.commitIndex; N-- {
 						log := strings.Split(logs[N], ",")
 						count := 0
 						logTerm, _ := strconv.Atoi(log[2])
 						if logTerm == me.currentTerm {
 							for i := range config {
 								if i != me.leaderIndex {
-									if matchIndex[i] >= N {
+									if me.matchIndex[i] >= N {
 										count++
 									}
 								}
 							}
 						}
 						if count >= majoritySize {
-							commitIndex = N
+							me.commitIndex = N
 							break
 						}
 					}
@@ -699,7 +669,7 @@ func main() {
 
 	args := os.Args[1:]
 	me.serverIndex, _ = strconv.Atoi(args[0])
-	// TODO: initialize the leaderElectionTimeout time randomly selected between timeoutmin and timeoutmax, initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
+	// TODO: initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
 	pid := os.Getpid()
 	fmt.Printf("Server %d starts with process id: %d\n", me.serverIndex, pid)
 	filename := config[me.serverIndex]["filename"]
