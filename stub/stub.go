@@ -43,6 +43,26 @@ func kv739_shutdown() int {
 	return 0
 }
 
+func executeGetKey(key string, value *string, address string) int {
+	client, err = rpc.DialHTTP("tcp", address)
+	if err == nil {
+		err = client.Call("Task.GetKey", key, value)
+		if err == nil {
+			if len(*value) > 0 {
+				return 0
+			}
+			return 1
+		} else if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
+			leaderIndex, _ = strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
+			address = serverList[leaderIndex]
+			return executeGetKey(key, value, address)
+		}
+		fmt.Println("Unable to get key: ", key, " from leader: ", leaderIndex, " err: ", err)
+	}
+	fmt.Println("Unable to establish connection with leader: ", leaderIndex, err)
+	return -1
+}
+
 //export kv739_get
 func kv739_get(key string, value *string) int {
 	err := client.Call("Task.GetKey", key, value)
@@ -51,35 +71,18 @@ func kv739_get(key string, value *string) int {
 			//Retry logic
 			leaderIndex, _ = strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
 			address := serverList[leaderIndex]
-			client, err = rpc.DialHTTP("tcp", address)
-			if err == nil {
-				err = client.Call("Task.GetKey", key, value)
-				if err == nil {
-					if len(*value) > 0 {
-						return 0
-					}
-					return 1
-				}
-				fmt.Println("Unable to get key: ", key, " from leader: ", leaderIndex, " err: ", err)
+			getResult := executeGetKey(key, value, address)
+			if getResult != -1 {
+				return getResult
 			}
-			fmt.Println("Unable to establish connection with leader: ", leaderIndex, err)
 		} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
 			for index, server := range serverList {
 				if index != leaderIndex {
-					fmt.Println("Retrying to establish connection with server index ", index)
-					client, err = rpc.DialHTTP("tcp", server)
-					if err == nil {
-						err = client.Call("Task.GetKey", key, value)
-						if err == nil {
-							leaderIndex = index
-							if len(*value) > 0 {
-								return 0
-							}
-							return 1
-						}
-						fmt.Println("Unable to get key: ", key, " from server: ", server, " err: ", err)
+					getResult := executeGetKey(key, value, server)
+					if getResult != -1 {
+						leaderIndex = index
+						return getResult
 					}
-					fmt.Println("Unable to establish connection with server: ", server, err)
 				}
 			}
 		}
@@ -92,6 +95,26 @@ func kv739_get(key string, value *string) int {
 	return 1
 }
 
+func executePutKey(key string, value string, oldValue *string, address string) int {
+	client, err = rpc.DialHTTP("tcp", address)
+	if err == nil {
+		err = client.Call("Task.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
+		if err == nil {
+			if len(*oldValue) > 0 {
+				return 0
+			}
+			return 1
+		} else if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
+			leaderIndex, _ = strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
+			address = serverList[leaderIndex]
+			return executePutKey(key, value, oldValue, address)
+		}
+		fmt.Println("Unable to put key: ", key, " from leader: ", leaderIndex, " err: ", err)
+	}
+	fmt.Println("Unable to establish connection with leader: ", leaderIndex, err)
+	return -1
+}
+
 //export kv739_put
 func kv739_put(key string, value string, oldValue *string) int {
 	err := client.Call("Task.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
@@ -100,36 +123,18 @@ func kv739_put(key string, value string, oldValue *string) int {
 			//Retry logic
 			leaderIndex, _ = strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
 			address := serverList[leaderIndex]
-			client, err = rpc.DialHTTP("tcp", address)
-			if err == nil {
-				err = client.Call("Task.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
-				if err == nil {
-					if len(*oldValue) > 0 {
-						return 0
-					}
-					return 1
-				}
-				fmt.Println("Unable to get key: ", key, " from leader: ", leaderIndex, " err: ", err)
+			putResult := executePutKey(key, value, oldValue, address)
+			if putResult != -1 {
+				return putResult
 			}
-			fmt.Println("Unable to establish connection with leader: ", leaderIndex, err)
 		} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
 			if len(serverList) > 1 {
 				for index, server := range serverList {
 					if index != leaderIndex {
-						fmt.Println("Retrying to establish connection with server index ", index)
-						client, err = rpc.DialHTTP("tcp", server)
-						if err == nil {
-							err := client.Call("Counter.PutKey", KeyValuePair{Key: key, Value: value}, &oldValue)
-							if err == nil {
-								leaderIndex = index
-								if len(*oldValue) > 0 {
-									return 0
-								}
-								return 1
-							}
-							fmt.Println("Unable to put key: ", key, " on server: ", server, " err: ", err)
-						} else {
-							fmt.Println("Unable to establish connection with server: ", server, err)
+						putResult := executePutKey(key, value, oldValue, server)
+						if putResult != -1 {
+							leaderIndex = index
+							return putResult
 						}
 					}
 				}
