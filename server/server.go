@@ -268,7 +268,7 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		newFileContent := strings.Join(lines[:], "\n")
 		err = ioutil.WriteFile(filename, []byte(newFileContent), 0)
 		if err != nil {
-			fmt.Printf("Unable to commit the entry to the server log file ", err)
+			fmt.Printf("Unable to commit the entry to the server log file %s", err)
 			return err
 		}
 
@@ -679,7 +679,7 @@ func Init(index int) error {
 	if e != nil {
 		fmt.Println("Listen error: ", e)
 	}
-	log.Printf("Serving RPC server on port %d", config[index]["port"])
+	log.Printf("Serving RPC server on port %s", config[index]["port"])
 
 	// Start accept incoming HTTP connections
 	err = http.Serve(listener, nil)
