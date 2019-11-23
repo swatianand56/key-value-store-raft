@@ -65,7 +65,9 @@ var serverVotedFor int // start value could be -1 (init from persistent storage 
 
 var serverIndex int
 
-var leaderIndex int
+// var leaderIndex int
+
+var leaderIndex = 0
 
 // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
 var commitIndex int
@@ -196,6 +198,7 @@ func (t *Task) GetKey(key string, value *string) error {
 			fmt.Println("Unable to replicate the get request to a majority of servers", err)
 			return err
 		}
+
 		// if successful, apply log entry to the file (fetch the value of the key from the file for get)
 		commitIndex = int(math.Max(float64(commitIndex), float64(logEntryIndex)))
 		lastAppliedIndex = commitIndex
@@ -288,7 +291,6 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		// Once it has been applied to the server file, we can set the commit index to the lastLogEntryIndex (should be kept here in the local variable to avoid conflicts with the parallel requests that might update it?)
 		commitIndex = int(math.Max(float64(commitIndex), float64(logEntryIndex)))
 		lastAppliedIndex = commitIndex
-
 		return nil
 	}
 	return errors.New("LeaderIndex:" + strconv.Itoa(leaderIndex))
@@ -581,6 +583,7 @@ func CheckConsistencySafety() error {
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication() error {
+	fmt.Printf("LogReplication calling\n")
 	filePath := config[leaderIndex]["logFile"]
 	for index := range config {
 		if index != leaderIndex {
@@ -667,6 +670,7 @@ func LogReplication() error {
 			}(index, filePath)
 		}
 	}
+	fmt.Printf("LogReplication done\n")
 	return nil
 }
 
