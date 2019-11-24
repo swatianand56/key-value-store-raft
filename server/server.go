@@ -577,6 +577,7 @@ func LogReplication(lastLogEntryIndex int) error {
 			var logEntries []LogEntry
 
 			// prepare logs to send
+			// TODO: use this from memory now
 			fileContent, err := ioutil.ReadFile(filePath)
 			if err != nil {
 				fmt.Printf("error %s\n", err)
@@ -623,8 +624,11 @@ func LogReplication(lastLogEntryIndex int) error {
 						me.nextIndex[server] = me.matchIndex[server] + 1
 					} else {
 						if appendEntriesReturn.CurrentTerm > me.currentTerm {
-							me.leaderIndex = server // if current term of the server is greater than leader term, the current leader will become the follower.
+							// TODO: unknown leaderIndex = -1, check for array index out of bounds error
+							me.leaderIndex = -1 // if current term of the server is greater than leader term, the current leader will become the follower.
 							// Doubt: though this might not save the actual leader index.
+							me.currentTerm = appendEntriesReturn.CurrentTerm
+							// return here -- you are no longer the leader
 						} else {
 							me.nextIndex[server] = me.nextIndex[server] - 1
 							// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
@@ -634,6 +638,7 @@ func LogReplication(lastLogEntryIndex int) error {
 				} else {
 					fmt.Printf("error from append entry \n")
 					fmt.Printf("%s ", err)
+					// TODO: calling for all the servers, only do for one server
 					LogReplication(lastLogEntryIndex)
 				}
 
