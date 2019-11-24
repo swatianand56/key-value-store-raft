@@ -565,31 +565,24 @@ func CheckConsistencySafety() error {
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication(lastLogEntryIndex int) error {
-	filePath := config[me.leaderIndex]["logfile"]
+	// filePath := config[me.serverIndex]["logfile"]
+	var wg sync.WaitGroup
+	wg.Add(majoritySize - 1) // leader counting it's own vote
 	for index := range config {
-		if index != me.leaderIndex {
+		if index != me.serverIndex {
 
 			var logEntries []LogEntry
 
 			// prepare logs to send
-			// TODO: use this from memory now
-			fileContent, err := ioutil.ReadFile(filePath)
-			if err != nil {
-				fmt.Printf("error %s\n", err)
-			}
-
-			logs := strings.Split(string(fileContent), "\n")
-			for j := me.nextIndex[index]; j < len(logs); j++ {
-				log := strings.Split(logs[j], ",")
-				le := LogEntry{Key: log[0], Value: log[1], TermID: log[2], IndexID: log[3]}
-				logEntries = append(logEntries, le)
+			for j := me.nextIndex[index]; j < len(me.logs); j++ {
+				logEntries = append(logEntries, me.logs[j])
 			}
 			fmt.Println(index, logEntries)
 
 			prevlogIndex := me.nextIndex[index] - 1
 			prevlogTerm := "0"
 			if prevlogIndex != -1 {
-				prevlogTerm = strings.Split(logs[prevlogIndex], ",")[2]
+				prevlogTerm = me.logs[prevlogIndex].TermID
 			}
 
 			server := index
@@ -611,65 +604,67 @@ func LogReplication(lastLogEntryIndex int) error {
 				fmt.Printf("%s ", err)
 			} else {
 				defer client.Close()
-
 				err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 				if err == nil {
 					if appendEntriesReturn.Success {
 						me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
 						me.nextIndex[server] = me.matchIndex[server] + 1
+						wg.Done()
 					} else {
 						if appendEntriesReturn.CurrentTerm > me.currentTerm {
 							// TODO: unknown leaderIndex = -1, check for array index out of bounds error
 							me.leaderIndex = -1 // if current term of the server is greater than leader term, the current leader will become the follower.
 							// Doubt: though this might not save the actual leader index.
 							me.currentTerm = appendEntriesReturn.CurrentTerm
-							// return here -- you are no longer the leader
+							// TODO: exit this with an error here: will wg.Wait() cause problems for this?
 						} else {
 							me.nextIndex[server] = me.nextIndex[server] - 1
 							// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
-							LogReplication(lastLogEntryIndex)
+							// LogReplication(lastLogEntryIndex)
 						}
 					}
 				} else {
 					fmt.Printf("error from append entry \n")
 					fmt.Printf("%s ", err)
 					// TODO: calling for all the servers, only do for one server
-					LogReplication(lastLogEntryIndex)
+					// LogReplication(lastLogEntryIndex)
 				}
 
-				fileContent, err := ioutil.ReadFile(filePath)
+				// fileContent, err := ioutil.ReadFile(filePath)
 
-				if err != nil {
-					fmt.Println(err)
-				}
+				// if err != nil {
+				// 	fmt.Println(err)
+				// }
 
-				logs := strings.Split(string(fileContent), "\n")
+				// logs := strings.Split(string(fileContent), "\n")
 
-				for N := len(logs) - 1; N > me.commitIndex; N-- {
-					log := strings.Split(logs[N], ",")
-					count := 0
-					logTerm, _ := strconv.Atoi(log[2])
-					if logTerm == me.currentTerm {
-						for i := range config {
-							if i != me.leaderIndex {
-								if me.matchIndex[i] >= N {
-									count++
-								}
-							}
-						}
-					}
-					if count >= majoritySize {
-						me.commitIndex = N
-						if lastLogEntryIndex <= me.commitIndex {
-							return nil
-						}
-						break
-					}
-				}
+				// for N := len(logs) - 1; N > me.commitIndex; N-- {
+				// 	log := strings.Split(logs[N], ",")
+				// 	count := 0
+				// 	logTerm, _ := strconv.Atoi(log[2])
+				// 	if logTerm == me.currentTerm {
+				// 		for i := range config {
+				// 			if i != me.leaderIndex {
+				// 				if me.matchIndex[i] >= N {
+				// 					count++
+				// 				}
+				// 			}
+				// 		}
+				// 	}
+				// 	if count >= majoritySize {
+				// 		me.commitIndex = N
+				// 		if lastLogEntryIndex <= me.commitIndex {
+				// 			return nil
+				// 		}
+				// 		break
+				// 	}
+				// }
 			}
 			// }(index, filePath)
 		}
 	}
+	wg.Wait()
+	me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
 	return nil
 }
 
