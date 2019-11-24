@@ -158,7 +158,7 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 			return err
 		}
 
-		err = LogReplication()
+		err = LogReplication(me.lastLogEntryIndex)
 		if err != nil {
 			fmt.Println("Unable to replicate the get request to a majority of servers", err)
 			return err
@@ -306,8 +306,8 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
 
+	me.mux.Lock()
 	metadataFile := config[me.serverIndex]["metadata"]
-	logFile := config[me.serverIndex]["logfile"]
 	me.lastMessageTime = time.Now().UnixNano()
 
 	// heartbeat
@@ -325,6 +325,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 				return err
 			}
 		}
+		me.mux.Unlock()
 		return nil
 	}
 
@@ -341,21 +342,10 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	me.leaderIndex = args.LeaderID
 
-	fileContent, err := ioutil.ReadFile(logFile)
-	if err != nil {
-		fmt.Println("Unable to read the log file", err)
-		return err
-	}
-
-	lines := []string{}
-	if len(string(fileContent)) != 0 {
-		lines = strings.Split(string(fileContent), "\n")
-	}
-
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.Split(lines[i], ",")
-		logIndex, _ := strconv.Atoi(line[3])
-		termIndex, _ := strconv.Atoi(line[2])
+	for i := len(me.logs) - 1; i >= 0; i-- {
+		log := me.logs[i]
+		logIndex, _ := strconv.Atoi(log.IndexID)
+		termIndex, _ := strconv.Atoi(log.TermID)
 		if (logIndex == args.PrevLogIndex && termIndex != args.PrevLogTerm) || logIndex < args.PrevLogIndex {
 			reply.Success = false
 			reply.CurrentTerm = args.LeaderTerm
@@ -364,10 +354,13 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 			break
 		}
 	}
-	// TODO: remove all log entries from lines after the matched logIndex
-	// logentrystr := lines.Join("\n")
 
-	me.logs = me.logs[:args.PrevLogIndex]
+	// TODO: remove all log entries from lines after the matched logIndex
+	if args.PrevLogIndex >= 0 {
+		me.logs = me.logs[:args.PrevLogIndex+1]
+	}
+
+	fmt.Printf("logs", me.logs)
 
 	for i := 0; i < len(args.Entries); i++ {
 		writeLogEntryInMemory(args.Entries[i])
@@ -376,7 +369,9 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	me.lastLogEntryIndex, _ = strconv.Atoi(args.Entries[len(args.Entries)-1].IndexID)
 	me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 
-	err = writeEntryToLogFile()
+	me.mux.Unlock()
+
+	err := writeEntryToLogFile()
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		reply.Success = false
@@ -718,7 +713,7 @@ func Init(index int) error {
 	// go LeaderElection()
 	// me.responses = make([]Vote, 10)
 	go applyCommittedEntries() // running this over a separate thread for indefinite time
-	go sendLeaderHeartbeats()
+	// go sendLeaderHeartbeats()
 
 	if err != nil {
 		fmt.Println("Format of service Task isn't correct. ", err)
