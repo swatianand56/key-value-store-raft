@@ -240,7 +240,7 @@ func (t *Task) PutKey(keyValue KeyValuePair, oldValue *string) error {
 			lines = strings.Split(string(fileContent), "\n")
 		}
 
-		for i := 1; i < len(lines); i++ {
+		for i := 0; i < len(lines); i++ {
 			line := strings.Split(lines[i], ",")
 			if line[0] == keyValue.Key {
 				*oldValue = line[1]
@@ -395,8 +395,9 @@ func (t *Task) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn)
 		return err
 	}
 	fmt.Printf("9 \n")
-
+	me.lastLogEntryIndex, _ = strconv.Atoi(args.Entries[len(args.Entries)-1].IndexID)
 	me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
+	fmt.Println("commit index ", args.LeaderCommitIndex, me.commitIndex)
 	reply.Success = true
 	reply.CurrentTerm = args.LeaderTerm
 
@@ -449,7 +450,7 @@ func sendLeaderHeartbeats() error {
 func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	serverFileName := config[me.serverIndex]["filename"]
-	logFileName := config[me.serverIndex]["logFile"]
+	logFileName := config[me.serverIndex]["logfile"]
 	for {
 		if me.lastAppliedIndex < me.commitIndex {
 			me.lastAppliedIndex++
@@ -458,25 +459,31 @@ func applyCommittedEntries() {
 			logs := strings.Split(string(fileContent), "\n")
 			currentLog := logs[me.lastAppliedIndex]
 			log := strings.Split(currentLog, ",")
+			currentEntryStr := log[0] + "," + log[1]
+			fmt.Println("log is ", log, currentLog)
 			value := log[1]
+			fmt.Println("value is ", value, currentLog, log)
 
 			// Add/update key value pair to the server if it is only a put request
 			if value != "" {
 				fileContent, _ := ioutil.ReadFile(serverFileName)
-				lines := strings.Split(string(fileContent), "\n")
+				lines := []string{}
+				if len(string(fileContent)) != 0 {
+					lines = strings.Split(string(fileContent), "\n")
+				}
 
 				keyFound := false
 				for i := 1; i < len(lines); i++ {
 					line := strings.Split(lines[i], ",")
 					if line[0] == log[0] {
-						lines[i] = currentLog
+						lines[i] = currentEntryStr
 						keyFound = true
 						break
 					}
 				}
 
 				if !keyFound {
-					lines = append(lines, currentLog)
+					lines = append(lines, currentEntryStr)
 				}
 
 				newFileContent := strings.Join(lines[:], "\n")
@@ -599,6 +606,7 @@ func LogReplication() error {
 				le := LogEntry{Key: log[0], Value: log[1], TermID: log[2], IndexID: log[3]}
 				logEntries = append(logEntries, le)
 			}
+			fmt.Println(index, logEntries)
 
 			prevlogIndex := me.nextIndex[index] - 1
 			prevlogTerm := "0"
@@ -629,7 +637,7 @@ func LogReplication() error {
 				err = client.Call("Task.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 				if err == nil {
 					if appendEntriesReturn.Success {
-						me.matchIndex[server] = prevlogIndex + len(logEntries)
+						me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
 						me.nextIndex[server] = me.matchIndex[server] + 1
 					} else {
 						if appendEntriesReturn.CurrentTerm > me.currentTerm {
@@ -687,14 +695,25 @@ func Init(index int) error {
 	me.serverIndex = index
 	me.leaderIndex = 0
 	me.alive = true
+
+	// TODO: can keep the lastAppliedIndex and commitIndex in metadata files
+	me.lastAppliedIndex = -1
+	me.commitIndex = -1
+
 	me.nextIndex[0] = 0
 	me.matchIndex[0] = 0
+
+	fileContent, _ := ioutil.ReadFile(config[me.leaderIndex]["logfile"])
+	lines := []string{}
+	if len(string(fileContent)) != 0 {
+		lines = strings.Split(string(fileContent), "\n")
+	}
+
 	if me.serverIndex != me.leaderIndex {
-		fileContent, _ := ioutil.ReadFile(config[0]["logfile"])
-		lines := strings.Split(string(fileContent), "\n")
-		me.nextIndex[me.serverIndex] = len(lines) + 1
+		me.nextIndex[me.serverIndex] = len(lines)
 		me.matchIndex[me.serverIndex] = 0
 	}
+	me.lastLogEntryIndex = len(lines)
 
 	// TODO: call leader election function asynchronously so that it's non blocking
 	// call applyCommittedEntries asynchronously so that it keeps running in the background
