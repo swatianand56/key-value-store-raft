@@ -46,7 +46,7 @@ func kv739_shutdown() int {
 func executeGetKey(key string, value *string, address string) int {
 	client, err = rpc.DialHTTP("tcp", address)
 	if err == nil {
-		err = client.Call("Task.GetKey", key, value)
+		err = client.Call("RaftServer.GetKey", key, value)
 		if err == nil {
 			if len(*value) > 0 {
 				return 0
@@ -65,7 +65,7 @@ func executeGetKey(key string, value *string, address string) int {
 
 //export kv739_get
 func kv739_get(key string, value *string) int {
-	err := client.Call("Task.GetKey", key, value)
+	err := client.Call("RaftServer.GetKey", key, value)
 	if err != nil {
 		if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
 			//Retry logic
@@ -98,7 +98,7 @@ func kv739_get(key string, value *string) int {
 func executePutKey(key string, value string, oldValue *string, address string) int {
 	client, err = rpc.DialHTTP("tcp", address)
 	if err == nil {
-		err = client.Call("Task.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
+		err = client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
 		if err == nil {
 			if len(*oldValue) > 0 {
 				return 0
@@ -117,7 +117,7 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 
 //export kv739_put
 func kv739_put(key string, value string, oldValue *string) int {
-	err := client.Call("Task.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
+	err := client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
 	if err != nil {
 		if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
 			//Retry logic
