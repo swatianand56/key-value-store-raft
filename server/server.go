@@ -210,10 +210,14 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	// Update the last commit ID? -- Do we need it as a variable?, replicate the data in log and lastAppliedIndex
 	// return response to the client
 	if me.serverIndex == me.leaderIndex {
+		me.mux.Lock()
+
 		me.lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		writeLogEntryInMemory(LogEntry{Key: keyValue.Key, Value: keyValue.Value, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
+
+		me.mux.Unlock()
 		err := writeEntryToLogFile()
 		if err != nil {
 			return err
@@ -229,6 +233,9 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		keyFound := false
 		newKeyValueString := keyValue.Key + "," + keyValue.Value
 		filename := config[me.serverIndex]["filename"]
+
+		me.mux.Lock()
+		defer me.mux.Unlock()
 		fileContent, err := ioutil.ReadFile(filename)
 		if err != nil {
 			fmt.Println(err)
@@ -450,7 +457,7 @@ func applyCommittedEntries() {
 				}
 
 				keyFound := false
-				for i := 1; i < len(lines); i++ {
+				for i := 0; i < len(lines); i++ {
 					line := strings.Split(lines[i], ",")
 					if line[0] == log[0] {
 						lines[i] = currentEntryStr
@@ -565,8 +572,15 @@ func CheckConsistencySafety() error {
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication(lastLogEntryIndex int) error {
 	// filePath := config[me.serverIndex]["logfile"]
-	var wg sync.WaitGroup
-	wg.Add(majoritySize - 1) // leader counting it's own vote
+	type LR struct {
+		mux             sync.Mutex
+		majorityCounter int
+		wg              sync.WaitGroup
+	}
+	var lr LR
+	lr.majorityCounter = majoritySize - 1 // leader counting it's own vote
+	lr.wg.Add(1)
+	var err error
 	for index := range config {
 		if index != me.serverIndex {
 
@@ -583,88 +597,72 @@ func LogReplication(lastLogEntryIndex int) error {
 			if prevlogIndex != -1 {
 				prevlogTerm = me.logs[prevlogIndex].TermID
 			}
+			go func(server int) {
+				for {
+					prevlogTermInt, _ := strconv.Atoi(prevlogTerm)
+					appendEntriesArgs := &AppendEntriesArgs{
+						LeaderTerm:        me.currentTerm,
+						LeaderID:          me.leaderIndex,
+						PrevLogIndex:      prevlogIndex,
+						PrevLogTerm:       prevlogTermInt,
+						Entries:           logEntries,
+						LeaderCommitIndex: me.commitIndex,
+					}
 
-			server := index
-			// go func(server int, filePath string) {
-			prevlogTermInt, _ := strconv.Atoi(prevlogTerm)
-			appendEntriesArgs := &AppendEntriesArgs{
-				LeaderTerm:        me.currentTerm,
-				LeaderID:          me.leaderIndex,
-				PrevLogIndex:      prevlogIndex,
-				PrevLogTerm:       prevlogTermInt,
-				Entries:           logEntries,
-				LeaderCommitIndex: me.commitIndex,
-			}
+					var appendEntriesReturn AppendEntriesReturn
 
-			var appendEntriesReturn AppendEntriesReturn
-
-			client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
-			if err != nil {
-				fmt.Printf("%s ", err)
-			} else {
-				defer client.Close()
-				err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
-				if err == nil {
-					if appendEntriesReturn.Success {
-						me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
-						me.nextIndex[server] = me.matchIndex[server] + 1
-						wg.Done()
+					client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
+					if err != nil {
+						fmt.Printf("%s ", err)
+						break
 					} else {
-						if appendEntriesReturn.CurrentTerm > me.currentTerm {
-							// TODO: unknown leaderIndex = -1, check for array index out of bounds error
-							me.leaderIndex = -1 // if current term of the server is greater than leader term, the current leader will become the follower.
-							// Doubt: though this might not save the actual leader index.
-							me.currentTerm = appendEntriesReturn.CurrentTerm
-							// TODO: exit this with an error here: will wg.Wait() cause problems for this?
+						defer client.Close()
+						err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
+						if err == nil {
+							if appendEntriesReturn.Success {
+								me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
+								me.nextIndex[server] = me.matchIndex[server] + 1
+								lr.mux.Lock()
+								lr.majorityCounter--
+								if lr.majorityCounter == 0 {
+									lr.wg.Done()
+								}
+								lr.mux.Unlock()
+								break
+							} else {
+								if appendEntriesReturn.CurrentTerm > me.currentTerm {
+									// TODO: unknown leaderIndex = -1, check for array index out of bounds error
+									me.leaderIndex = -1 // if current term of the server is greater than leader term, the current leader will become the follower.
+									// Doubt: though this might not save the actual leader index.
+									me.currentTerm = appendEntriesReturn.CurrentTerm
+									// TODO: exit this with an error here: will wg.Wait() cause problems for this?
+									err = errors.New("Leader has changed state to follower, so consensus cannot be reached")
+									lr.mux.Lock()
+									if lr.majorityCounter > 0 {
+										lr.wg.Done()
+										lr.majorityCounter = -1
+									}
+									lr.mux.Unlock()
+									break
+								}
+								me.nextIndex[server] = me.nextIndex[server] - 1
+								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
+								// LogReplication(lastLogEntryIndex)
+							}
 						} else {
-							me.nextIndex[server] = me.nextIndex[server] - 1
-							// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
+							fmt.Printf("error from append entry \n")
+							fmt.Printf("%s ", err)
+							// TODO: calling for all the servers, only do for one server
 							// LogReplication(lastLogEntryIndex)
 						}
 					}
-				} else {
-					fmt.Printf("error from append entry \n")
-					fmt.Printf("%s ", err)
-					// TODO: calling for all the servers, only do for one server
-					// LogReplication(lastLogEntryIndex)
 				}
-
-				// fileContent, err := ioutil.ReadFile(filePath)
-
-				// if err != nil {
-				// 	fmt.Println(err)
-				// }
-
-				// logs := strings.Split(string(fileContent), "\n")
-
-				// for N := len(logs) - 1; N > me.commitIndex; N-- {
-				// 	log := strings.Split(logs[N], ",")
-				// 	count := 0
-				// 	logTerm, _ := strconv.Atoi(log[2])
-				// 	if logTerm == me.currentTerm {
-				// 		for i := range config {
-				// 			if i != me.leaderIndex {
-				// 				if me.matchIndex[i] >= N {
-				// 					count++
-				// 				}
-				// 			}
-				// 		}
-				// 	}
-				// 	if count >= majoritySize {
-				// 		me.commitIndex = N
-				// 		if lastLogEntryIndex <= me.commitIndex {
-				// 			return nil
-				// 		}
-				// 		break
-				// 	}
-				// }
-			}
-			// }(index, filePath)
+			}(index)
 		}
 	}
-	wg.Wait()
+	lr.wg.Wait()
 	me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
-	return nil
+	return err
 }
 
 //Init ... takes in config and index of the current server in config
