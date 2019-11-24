@@ -305,29 +305,34 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	// also read the last line of the logfile to see what the last log index is
 
 	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
+	metadataFile := config[me.serverIndex]["metadata"]
 
 	me.mux.Lock()
-	metadataFile := config[me.serverIndex]["metadata"]
 	me.lastMessageTime = time.Now().UnixNano()
+	me.mux.Unlock()
 
 	// heartbeat
 	if len(args.Entries) == 0 {
+		me.mux.Lock()
+		defer me.mux.Unlock()
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
 			me.currentTerm = args.LeaderTerm
 			me.leaderIndex = args.LeaderID
 			reply.CurrentTerm = args.LeaderTerm
 			me.serverVotedFor = -1
+			me.mux.Unlock()
 			lines := [2]string{strconv.Itoa(args.LeaderTerm), "-1"}
-			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
+			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0) // is there any way we can do this outside of lock??
 			if err != nil {
 				fmt.Println("Unable to write the new metadata information", err)
 				return err
 			}
 		}
-		me.mux.Unlock()
 		return nil
 	}
+
+	me.mux.Lock()
 
 	// return false if recipient's term > leader's term
 	if me.currentTerm > args.LeaderTerm {
@@ -356,11 +361,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	}
 
 	// TODO: remove all log entries from lines after the matched logIndex
-	if args.PrevLogIndex >= 0 {
-		me.logs = me.logs[:args.PrevLogIndex+1]
-	}
-
-	fmt.Printf("logs", me.logs)
+	me.logs = me.logs[:args.PrevLogIndex+1]
 
 	for i := 0; i < len(args.Entries); i++ {
 		writeLogEntryInMemory(args.Entries[i])
@@ -438,9 +439,7 @@ func applyCommittedEntries() {
 			currentLog := logs[me.lastAppliedIndex]
 			log := strings.Split(currentLog, ",")
 			currentEntryStr := log[0] + "," + log[1]
-			fmt.Println("log is ", log, currentLog)
 			value := log[1]
-			fmt.Println("value is ", value, currentLog, log)
 
 			// Add/update key value pair to the server if it is only a put request
 			if value != "" {
