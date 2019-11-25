@@ -1,3 +1,19 @@
+# Notes
+
+## References
+
+### Teaching Rigorous Distributed Systems with Efficient Model Checking
+
+Mike would like us to investigate whether TRDSwEMC is pedagogically useful.
+
+https://homes.cs.washington.edu/~mernst/pubs/dslabs-eurosys2019.pdf
+
+### Distributed Systems Labs and Framework
+
+The companion repo to the paper.
+
+https://github.com/emichael/dslabs
+
 # key-value-store-raft
 Key Value Store Implementation Using Raft Consensus Algorithm
 
@@ -24,7 +40,7 @@ of the servers before committing. This will ensure that the log has been replica
 of the servers.
 
 
-# Evaluation: 
+# Evaluation:
 We will be testing our algorithm on 5 replicas that’ll be running on VM’s hosted on a public
 cloud. We would be using our Key-Value store implemented for Project 1 as the baseline and compare its
 performance and correctness with the current consensus-based implementation.
