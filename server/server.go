@@ -9,7 +9,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -66,6 +65,7 @@ type RaftServer struct {
 	// who am I?
 	serverIndex int // my ID
 	logs        []LogEntry
+	data        []KeyValuePair
 
 	// when is it?
 	currentTerm       int // start value could be 0 (init from persistent storage during start)
@@ -161,28 +161,16 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
 		me.lastAppliedIndex = me.commitIndex
 
-		me.mux.Unlock()
 		// fetch the value of the key
-
-		file, err := os.Open(config[me.serverIndex]["filename"])
-		if err != nil {
-			fmt.Println("Unable to open server file in get key", err)
-			return err
-		}
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			var line []string = strings.Split(scanner.Text(), ",")
-			if line[0] == key {
-				*value = line[1]
+		for i := 0; i < (len(me.data)); i++ {
+			data := me.data[i]
+			if data.Key == key {
+				*value = data.Value
 				return nil
 			}
 		}
-		if err := scanner.Err(); err != nil {
-			fmt.Println("GetKey: Error while reading the file to find key value ", err)
-			return err
-		}
+
+		me.mux.Unlock()
 		return nil
 	}
 	// cannot find a way to transfer connection to another server, so throwing error with leaderIndex
@@ -222,54 +210,56 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 
 		// Written to log, now do the operation on the file (following write-ahead logging semantics)
 		keyFound := false
-		newKeyValueString := keyValue.Key + "," + keyValue.Value
-		filename := config[me.serverIndex]["filename"]
-
 		me.mux.Lock()
-		defer me.mux.Unlock()
-		fileContent, err := ioutil.ReadFile(filename)
-		if err != nil {
-			fmt.Println("Unable to read server file in put key", err)
-			return err
-		}
-
-		lines := []string{}
-		if len(string(fileContent)) != 0 {
-			lines = strings.Split(string(fileContent), "\n")
-		}
-
-		for i := 0; i < len(lines); i++ {
-			line := strings.Split(lines[i], ",")
-			if line[0] == keyValue.Key {
-				*oldValue = line[1]
-				lines[i] = newKeyValueString
+		for i := 0; i < len(me.data); i++ {
+			data := me.data[i]
+			if keyValue.Key == data.Key {
+				*oldValue = data.Value
+				me.data[i] = data
 				keyFound = true
 				break
 			}
 		}
-
 		if !keyFound {
-			lines = append(lines, newKeyValueString)
-		}
-
-		newFileContent := strings.Join(lines[:], "\n")
-		err = ioutil.WriteFile(filename, []byte(newFileContent), 0)
-		if err != nil {
-			fmt.Println("Unable to commit the entry to the server log file", err)
-			return err
+			me.data = append(me.data, keyValue)
 		}
 
 		// Once it has been applied to the server file, we can set the commit index to the lastLogEntryIndex (should be kept here in the local variable to avoid conflicts with the parallel requests that might update it?)
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
 		me.lastAppliedIndex = me.commitIndex
+		me.mux.Unlock()
+
+		err = writeDataInFile()
+		if err != nil {
+			return err
+		}
+
 		return nil
 	}
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
 
+func writeDataInFile() error {
+	lines := []string{}
+	me.mux.Lock()
+	totalData := me.data
+	me.mux.Unlock()
+
+	for _, data := range totalData {
+		datastr := data.Key + "," + data.Value
+		lines = append(lines, datastr)
+	}
+	err := ioutil.WriteFile(config[me.serverIndex]["filename"], []byte(strings.Join(lines[:], "\n")), 0)
+	return err
+}
+
 func writeEntryToLogFile() error {
 	lines := []string{}
-	for _, log := range me.logs {
+	me.mux.Lock()
+	logs := me.logs
+	me.mux.Unlock()
+
+	for _, log := range logs {
 		logstr := log.Key + "," + log.Value + "," + log.TermID + "," + log.IndexID
 		lines = append(lines, logstr)
 	}
@@ -434,20 +424,21 @@ func sendLeaderHeartbeats() error {
 		if me.serverIndex == me.leaderIndex {
 			for i := 0; i < len(config); i++ {
 				if i != me.serverIndex {
-					// send appendentries heartbeat rpc in async and no need to wait for response
-					client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
-					if err != nil {
-						fmt.Println("Leader unable to create connection with another server ", err)
-					} else {
-						// defer client.Close()
-						var appendEntriesResult AppendEntriesReturn
-						// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
-						client.Go("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
-							PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
-							&appendEntriesResult, nil)
-						client.Close()
+					go func(i int) {
+						// send appendentries heartbeat rpc in async and no need to wait for response
+						client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
+						if err != nil {
+							fmt.Println("Leader unable to create connection with another server ", err)
+						} else {
+							defer client.Close()
+							var appendEntriesResult AppendEntriesReturn
+							// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
+							client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
+								PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
+								&appendEntriesResult)
 
-					}
+						}
+					}(i)
 				}
 			}
 		} else {
@@ -459,45 +450,38 @@ func sendLeaderHeartbeats() error {
 
 func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
-	serverFileName := config[me.serverIndex]["filename"]
 	for {
+		me.mux.Lock()
 		if me.lastAppliedIndex < me.commitIndex {
 			me.lastAppliedIndex++
 			logs := me.logs
-
 			currentLog := logs[me.lastAppliedIndex]
-			currentEntryStr := currentLog.Key + "," + currentLog.Value
 			value := currentLog.Value
 
 			// Add/update key value pair to the server if it is only a put request
 			if value != "" {
-				fileContent, _ := ioutil.ReadFile(serverFileName)
-				lines := []string{}
-				if len(string(fileContent)) != 0 {
-					lines = strings.Split(string(fileContent), "\n")
-				}
-
 				keyFound := false
-				for i := 0; i < len(lines); i++ {
-					line := strings.Split(lines[i], ",")
-					if line[0] == currentLog.Key {
-						lines[i] = currentEntryStr
+				for i := 0; i < len(me.data); i++ {
+					data := me.data[i]
+					if data.Key == currentLog.Key {
+						data.Value = currentLog.Value
+						me.data[i] = data
 						keyFound = true
 						break
 					}
 				}
-
 				if !keyFound {
-					lines = append(lines, currentEntryStr)
-				}
-
-				newFileContent := strings.Join(lines[:], "\n")
-				err := ioutil.WriteFile(serverFileName, []byte(newFileContent), 0)
-				if err != nil {
-					fmt.Println("Unable to write to file in applyCommittedEntries", err)
+					me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
 				}
 			}
+			me.mux.Unlock()
+
+			err := writeDataInFile()
+			if err != nil {
+				fmt.Println("error in writing data at file", err)
+			}
 		} else {
+			me.mux.Unlock()
 			time.Sleep(100 * time.Millisecond) // check after every 100ms
 		}
 	}
@@ -601,7 +585,7 @@ func LeaderElection() error {
 				}(index)
 			}
 		}
-		timeout := 100 * time.Millisecond
+		timeout := 150 * time.Millisecond
 		if !waitTimeout(&le.wg, timeout) {
 			if currentElectionTerm == me.currentTerm {
 				me.mux.Lock()
@@ -751,9 +735,9 @@ func Init(index int) error {
 	me.nextIndex[0] = 0
 	me.matchIndex[0] = 0
 
-	me.leaderHeartBeatDuration = 50
-	me.electionMaxTime = 300000000
-	me.electionMinTime = 150000000
+	me.leaderHeartBeatDuration = 150
+	me.electionMaxTime = 400000000
+	me.electionMinTime = 250000000
 
 	fileContent, _ := ioutil.ReadFile(config[me.serverIndex]["logfile"])
 	lines := []string{}
@@ -772,6 +756,18 @@ func Init(index int) error {
 		line := strings.Split(lines[index], ",")
 		thisLog := LogEntry{Key: line[0], Value: line[1], TermID: line[2], IndexID: line[3]}
 		me.logs = append(me.logs, thisLog)
+	}
+
+	// loading data into memory
+	fileContent, _ = ioutil.ReadFile(config[me.serverIndex]["filename"])
+	data := []string{}
+	if len(string(fileContent)) != 0 {
+		data = strings.Split(string(fileContent), "\n")
+	}
+	for index := range data {
+		line := strings.Split(data[index], ",")
+		thisdata := KeyValuePair{Key: line[0], Value: line[1]}
+		me.data = append(me.data, thisdata)
 	}
 
 	me.lastLogEntryIndex = len(lines) - 1
