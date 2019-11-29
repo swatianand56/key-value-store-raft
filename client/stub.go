@@ -22,15 +22,20 @@ type KeyValuePair struct {
 //export kv739_init
 func kv739_init(serverListArg []string, length int) int {
 	//TODO: can you work without length argument?
-	leaderIndex = 0
-	serverList = serverListArg
-	address := serverList[leaderIndex]
-	client, err = rpc.DialHTTP("tcp", address)
-	if err != nil {
-		fmt.Println("Connection error: ", err)
-		return -1
+	for index, _ := range serverListArg {
+		serverList = serverListArg
+		address := serverList[index]
+		client, err = rpc.DialHTTP("tcp", address)
+		if err != nil {
+			if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+				fmt.Println("Connection error: ", err)
+			} else {
+				return -1
+			}
+		}
+		return 0
 	}
-	return 0
+	return -1
 }
 
 //export kv739_shutdown
@@ -120,6 +125,7 @@ func kv739_put(key string, value string, oldValue *string) int {
 	fmt.Printf("hello")
 	err := client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
 	if err != nil {
+		fmt.Println(err)
 		if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
 			//Retry logic
 			leaderIndex, _ = strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
