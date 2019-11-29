@@ -142,7 +142,6 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		writeLogEntryInMemory(LogEntry{Key: key, Value: "", TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
-
 		me.mux.Unlock()
 
 		err := writeEntryToLogFile()
@@ -210,8 +209,8 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		writeLogEntryInMemory(LogEntry{Key: keyValue.Key, Value: keyValue.Value, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
-
 		me.mux.Unlock()
+
 		err := writeEntryToLogFile()
 		if err != nil {
 			return err
@@ -453,6 +452,7 @@ func applyCommittedEntries() {
 	serverFileName := config[me.serverIndex]["filename"]
 	logFileName := config[me.serverIndex]["logfile"]
 	for {
+		// fmt.Println(len(me.logs), me.lastAppliedIndex, me.commitIndex)
 		if me.lastAppliedIndex < me.commitIndex {
 			me.lastAppliedIndex++
 
@@ -582,16 +582,32 @@ func LeaderElection() error {
 				}(index)
 			}
 		}
-		// ToDo - handle the split vote timeout
-		le.wg.Wait()
-		if currentElectionTerm == me.currentTerm {
-			fmt.Println(4)
-			me.mux.Lock()
-			me.leaderIndex = me.serverIndex
-			fmt.Println("new leader elected - ", me.serverIndex)
-			me.mux.Unlock()
-			go sendLeaderHeartbeats()
+		timeout := 100 * time.Millisecond
+		if !waitTimeout(&le.wg, timeout) {
+			if currentElectionTerm == me.currentTerm {
+				fmt.Println(4)
+				me.mux.Lock()
+				me.leaderIndex = me.serverIndex
+				fmt.Println("new leader elected - ", me.serverIndex)
+				me.mux.Unlock()
+				go sendLeaderHeartbeats()
+			}
 		}
+	}
+}
+
+// handling timeout for waitgroup
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+	select {
+	case <-c:
+		return false // completed normally
+	case <-time.After(timeout):
+		return true // timed out
 	}
 }
 
@@ -736,7 +752,7 @@ func Init(index int) error {
 		me.logs = append(me.logs, thisLog)
 	}
 
-	me.lastLogEntryIndex = len(lines)
+	me.lastLogEntryIndex = len(lines) - 1
 
 	// TODO: call leader election function asynchronously so that it's non blocking
 	// call applyCommittedEntries asynchronously so that it keeps running in the background
