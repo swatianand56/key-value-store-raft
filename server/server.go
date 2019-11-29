@@ -506,13 +506,11 @@ func LeaderElection() error {
 
 	for {
 		var lastNap = rand.Intn(me.electionMaxTime-me.electionMinTime) + me.electionMinTime
-		fmt.Println("server nap time - ", me.serverIndex, lastNap)
 		var asleep = time.Now().UnixNano()
 		time.Sleep(time.Duration(lastNap) * time.Nanosecond)
 
 		// no election necessary if the last message was received after we went to sleep.
-		if me.lastMessageTime > asleep {
-			fmt.Println("I got the hearbeat")
+		if me.lastMessageTime > asleep || me.serverIndex == me.leaderIndex {
 			continue
 		}
 
@@ -716,8 +714,8 @@ func Init(index int) error {
 	me.matchIndex[0] = 0
 
 	me.leaderHeartBeatDuration = 50
-	me.electionMaxTime = 300000
-	me.electionMinTime = 150000
+	me.electionMaxTime = 300000000
+	me.electionMinTime = 150000000
 
 	fileContent, _ := ioutil.ReadFile(config[me.serverIndex]["logfile"])
 	lines := []string{}
