@@ -56,12 +56,9 @@ var config = []map[string]string{
 	},
 }
 
-// TODO: @Swati: add these 2 variables (serverCurrentTerm and serverVotedFor) in the RaftServer struct
 // Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- using a separate metadata file for this
-// var serverVotedFor int --- These 2 have to be added in logFile (may be use the first 2 lines of the logFile)
 // var currentTerm int (Also maintaining it in volatile memory to avoid Disk IO everytime)
 // var me.currentTerm int // start value could be 0 (init from persistent storage during start)
-// var serverVotedFor int // start value could be -1 (init from persistent storage during start)
 
 var me RaftServer
 
@@ -71,13 +68,13 @@ type RaftServer struct {
 	logs        []LogEntry
 
 	// when is it?
-	currentTerm       int   // start value could be 0 (init from persistent storage during start)
-	serverVotedFor    int   // where is this even being used? -- TODO: check this, May be separate variable defined for this
+	currentTerm       int // start value could be 0 (init from persistent storage during start)
+	serverVotedFor    int
 	lastMessageTime   int64 // time in nanoseconds
 	commitIndex       int   // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
 	lastAppliedIndex  int
 	lastLogEntryIndex int
-	lastLogEntryTerm  int //TODO: init from persistent storage on start
+	lastLogEntryTerm  int
 
 	// elections
 	leaderIndex             int // the current leader
@@ -293,7 +290,6 @@ func writeLogEntryInMemory(entry LogEntry) {
 // ...
 // if leaderIndex != leaderID, change the leaderID index maintained on this server
 // entries argument empty for heartbeat
-// TODO: @Swati
 // func (t *Task) AppendEntries(leaderTerm int, leaderID int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommitIndex int, currentTerm *int, success *bool) error {
 func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReturn) error {
 	// if leaderCommitIndex > commitIndex on server, apply the commits to the log file (should only be done after replication and logMatching is successful)
@@ -323,7 +319,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 			me.serverVotedFor = -1
 			me.mux.Unlock()
 			lines := [2]string{strconv.Itoa(args.LeaderTerm), "-1"}
-			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0) // is there any way we can do this outside of lock??
+			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
 			if err != nil {
 				fmt.Println("Unable to write the new metadata information", err)
 				return err
@@ -345,8 +341,13 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// if a new leader asked us to join their cluster, do so. (this is to stop leader election if this server is candidating an election)
 	me.currentTerm = args.LeaderTerm
-
 	me.leaderIndex = args.LeaderID
+
+	metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
+	err := ioutil.WriteFile(metadataFile, []byte(strings.Join(metadataContent[:], "\n")), 0)
+	if err != nil {
+		fmt.Println("Unable to write the new metadata information", err)
+	}
 
 	for i := len(me.logs) - 1; i >= 0; i-- {
 		log := me.logs[i]
@@ -372,7 +373,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	me.mux.Unlock()
 
-	err := writeEntryToLogFile()
+	err = writeEntryToLogFile()
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		reply.Success = false
@@ -404,11 +405,17 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 
 		if args.LastLogTerm > me.lastLogEntryTerm || (args.LastLogTerm == me.lastLogEntryTerm && args.LastLogIndex >= me.lastLogEntryIndex) {
 			// if I'm outdated, remote has my vote.
-			// TODO: Also add to persistent storage
+			me.mux.Lock()
 			me.serverVotedFor = args.CandidateIndex
 			me.currentTerm = args.CandidateTerm
+			me.mux.Unlock()
 			reply.CurrentTerm = me.currentTerm
 			reply.VoteGranted = true
+			metadataContent := [2]string{strconv.Itoa(me.currentTerm), strconv.Itoa(me.serverVotedFor)}
+			err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+			if err != nil {
+				fmt.Println("Request Vote RPC: Unable to write to metadata file ", me.serverIndex, me.currentTerm, me.serverVotedFor)
+			}
 		}
 	} else {
 		reply.CurrentTerm = me.currentTerm
@@ -446,7 +453,6 @@ func sendLeaderHeartbeats() error {
 	}
 }
 
-// TODO: @Geetika
 func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	serverFileName := config[me.serverIndex]["filename"]
@@ -525,6 +531,12 @@ func LeaderElection() error {
 		lastLogEntryIndex := me.lastLogEntryIndex
 		me.mux.Unlock()
 
+		metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
+		err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+		if err != nil {
+			fmt.Println("Unable to write the new metadata information", err)
+		}
+
 		// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
 		// forget the responses we've received so far.
 		var requestVoteResponses [numServers]RequestVoteResponse
@@ -575,21 +587,44 @@ func LeaderElection() error {
 									le.wg.Done()
 								}
 								me.mux.Unlock()
+
+								metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
+								err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+								if err != nil {
+									fmt.Println("Unable to write the new metadata information", err)
+								}
 							}
 						}
 					}
 				}(index)
 			}
 		}
-		le.wg.Wait()
-		if currentElectionTerm == me.currentTerm {
-			fmt.Println(4)
-			me.mux.Lock()
-			me.leaderIndex = me.serverIndex
-			fmt.Println("new leader elected - ", me.serverIndex)
-			me.mux.Unlock()
-			go sendLeaderHeartbeats()
+		timeout := 100 * time.Millisecond
+		if !waitTimeout(&le.wg, timeout) {
+			if currentElectionTerm == me.currentTerm {
+				fmt.Println(4)
+				me.mux.Lock()
+				me.leaderIndex = me.serverIndex
+				fmt.Println("new leader elected - ", me.serverIndex)
+				me.mux.Unlock()
+				go sendLeaderHeartbeats()
+			}
 		}
+	}
+}
+
+// handling timeout for waitgroup
+func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+	select {
+	case <-c:
+		return false // completed normally
+	case <-time.After(timeout):
+		return true // timed out
 	}
 }
 
@@ -598,7 +633,6 @@ func LeaderElection() error {
 // 3. When majority response received, add to the server file
 // 4. If AppendEntries fail, need to update the lastMatchedLogIndex for that server and retry. this keeps retrying unless successful
 // Also update the lastLogEntryIndex, commitIndex updated in appendentries
-// TODO: @Geetika
 // Doubt: For log replication, we need the logs to follow the same term and index as leader, so changing the entries type to be LogEntry instead of KeyValuePair
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication(lastLogEntryIndex int) error {
@@ -670,6 +704,7 @@ func LogReplication(lastLogEntryIndex int) error {
 									// Doubt: though this might not save the actual leader index.
 									me.currentTerm = appendEntriesReturn.CurrentTerm
 									me.mux.Unlock()
+
 									err = errors.New("Leader has changed state to follower, so consensus cannot be reached")
 									lr.mux.Lock()
 									if lr.majorityCounter > 0 {
@@ -677,6 +712,13 @@ func LogReplication(lastLogEntryIndex int) error {
 										lr.majorityCounter = -1
 									}
 									lr.mux.Unlock()
+
+									metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
+									err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+									if err != nil {
+										fmt.Println("Unable to write the new metadata information", err)
+									}
+
 									break
 								}
 								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
@@ -703,10 +745,9 @@ func Init(index int) error {
 	me.serverIndex = index
 	me.leaderIndex = -1
 
-	// TODO: can keep the lastAppliedIndex and commitIndex in metadata files
+	// TODO: commitIndex and lastAppliedIndex can also be saved in metadata file
 	me.lastAppliedIndex = -1
 	me.commitIndex = -1
-	me.serverVotedFor = -1
 
 	me.nextIndex[0] = 0
 	me.matchIndex[0] = 0
@@ -734,7 +775,23 @@ func Init(index int) error {
 		me.logs = append(me.logs, thisLog)
 	}
 
-	me.lastLogEntryIndex = len(lines)
+	me.lastLogEntryIndex = len(lines) - 1
+	if me.lastLogEntryIndex < 0 {
+		me.lastLogEntryTerm = 0
+	} else {
+		me.lastLogEntryTerm, _ = strconv.Atoi(strings.Split(lines[me.lastLogEntryIndex], ",")[2])
+	}
+
+	metadataContent, _ := ioutil.ReadFile(config[me.serverIndex]["metadata"])
+
+	if len(string(metadataContent)) != 0 {
+		lines = strings.Split(string(metadataContent), "\n")
+		me.currentTerm, _ = strconv.Atoi(lines[0])
+		me.serverVotedFor, _ = strconv.Atoi(lines[1])
+	} else {
+		me.currentTerm = 0
+		me.serverVotedFor = -1
+	}
 
 	go LeaderElection()
 	go applyCommittedEntries() // running this over a separate thread for indefinite time
@@ -765,7 +822,6 @@ func main() {
 	args := os.Args[1:]
 	serverIndex, _ := strconv.Atoi(args[0])
 
-	// TODO: initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
 	pid := os.Getpid()
 	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
 
