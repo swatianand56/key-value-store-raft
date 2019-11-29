@@ -166,7 +166,7 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 
 		file, err := os.Open(config[me.serverIndex]["filename"])
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Unable to open server file in get key", err)
 			return err
 		}
 		defer file.Close()
@@ -229,7 +229,7 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		defer me.mux.Unlock()
 		fileContent, err := ioutil.ReadFile(filename)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Unable to read server file in put key", err)
 			return err
 		}
 
@@ -255,7 +255,7 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		newFileContent := strings.Join(lines[:], "\n")
 		err = ioutil.WriteFile(filename, []byte(newFileContent), 0)
 		if err != nil {
-			fmt.Printf("Unable to commit the entry to the server log file %s", err)
+			fmt.Println("Unable to commit the entry to the server log file", err)
 			return err
 		}
 
@@ -279,6 +279,8 @@ func writeEntryToLogFile() error {
 
 func writeLogEntryInMemory(entry LogEntry) {
 	me.logs = append(me.logs, entry)
+	me.lastLogEntryIndex, _ = strconv.Atoi(entry.IndexID)
+	me.lastLogEntryTerm, _ = strconv.Atoi(entry.TermID)
 }
 
 // AppendEntries ...
@@ -437,12 +439,14 @@ func sendLeaderHeartbeats() error {
 					if err != nil {
 						fmt.Println("Leader unable to create connection with another server ", err)
 					} else {
+						// defer client.Close()
 						var appendEntriesResult AppendEntriesReturn
 						// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
 						client.Go("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
 							PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
 							&appendEntriesResult, nil)
 						client.Close()
+
 					}
 				}
 			}
@@ -456,17 +460,14 @@ func sendLeaderHeartbeats() error {
 func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	serverFileName := config[me.serverIndex]["filename"]
-	logFileName := config[me.serverIndex]["logfile"]
 	for {
 		if me.lastAppliedIndex < me.commitIndex {
 			me.lastAppliedIndex++
+			logs := me.logs
 
-			fileContent, _ := ioutil.ReadFile(logFileName)
-			logs := strings.Split(string(fileContent), "\n")
 			currentLog := logs[me.lastAppliedIndex]
-			log := strings.Split(currentLog, ",")
-			currentEntryStr := log[0] + "," + log[1]
-			value := log[1]
+			currentEntryStr := currentLog.Key + "," + currentLog.Value
+			value := currentLog.Value
 
 			// Add/update key value pair to the server if it is only a put request
 			if value != "" {
@@ -479,7 +480,7 @@ func applyCommittedEntries() {
 				keyFound := false
 				for i := 0; i < len(lines); i++ {
 					line := strings.Split(lines[i], ",")
-					if line[0] == log[0] {
+					if line[0] == currentLog.Key {
 						lines[i] = currentEntryStr
 						keyFound = true
 						break
@@ -519,6 +520,8 @@ func LeaderElection() error {
 			continue
 		}
 
+		fmt.Println("Starting Leader Election", me.serverIndex)
+
 		/*
 		 * oy, it's election time!
 		 */
@@ -556,7 +559,7 @@ func LeaderElection() error {
 				go func(index int) {
 					client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
 					if err != nil {
-						fmt.Println("Leader unable to create connection with another server ", err)
+						fmt.Println("Candidate unable to create connection with another server ", err)
 					} else {
 						defer client.Close()
 
@@ -567,8 +570,10 @@ func LeaderElection() error {
 							LastLogTerm:    lastLogEntryTerm,
 						}
 						err := client.Call("RaftServer.RequestVote", voteRequest, &requestVoteResponses[index])
+						if err != nil {
+							fmt.Println("Error in request vote", err)
+						}
 						if requestVoteResponses[index].VoteGranted {
-							fmt.Println(2)
 							le.mux.Lock()
 							le.majorityCounter--
 							if le.majorityCounter == 0 {
@@ -576,9 +581,6 @@ func LeaderElection() error {
 							}
 							le.mux.Unlock()
 						} else {
-							fmt.Println(err)
-							fmt.Println("terms - ", currentElectionTerm, requestVoteResponses[index].CurrentTerm)
-							fmt.Println(3)
 							if requestVoteResponses[index].CurrentTerm > currentElectionTerm {
 								me.mux.Lock()
 								me.currentTerm = int(math.Max(float64(me.currentTerm), float64(requestVoteResponses[index].CurrentTerm)))
@@ -602,7 +604,6 @@ func LeaderElection() error {
 		timeout := 100 * time.Millisecond
 		if !waitTimeout(&le.wg, timeout) {
 			if currentElectionTerm == me.currentTerm {
-				fmt.Println(4)
 				me.mux.Lock()
 				me.leaderIndex = me.serverIndex
 				fmt.Println("new leader elected - ", me.serverIndex)
@@ -655,7 +656,6 @@ func LogReplication(lastLogEntryIndex int) error {
 			for j := me.nextIndex[index]; j < len(me.logs); j++ {
 				logEntries = append(logEntries, me.logs[j])
 			}
-			fmt.Println(index, logEntries)
 
 			prevlogIndex := me.nextIndex[index] - 1
 			prevlogTerm := "0"
@@ -678,7 +678,7 @@ func LogReplication(lastLogEntryIndex int) error {
 
 					client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
 					if err != nil {
-						fmt.Printf("%s ", err)
+						fmt.Println("Leader unable to make connection for log replication", err)
 						break
 					} else {
 						defer client.Close()
@@ -725,8 +725,7 @@ func LogReplication(lastLogEntryIndex int) error {
 								me.nextIndex[server] = me.nextIndex[server] - 1
 							}
 						} else {
-							fmt.Printf("error from append entry \n")
-							fmt.Printf("%s ", err)
+							fmt.Println("error from append entry", err)
 						}
 					}
 				}
@@ -808,7 +807,7 @@ func Init(index int) error {
 	if e != nil {
 		fmt.Println("Listen error: ", e)
 	}
-	log.Printf("Serving RPC server on port %s", config[index]["port"])
+	log.Println("Serving RPC server on port", config[index]["port"])
 
 	// Start accept incoming HTTP connections
 	err = http.Serve(listener, nil)
@@ -831,26 +830,29 @@ func main() {
 
 	_, err := os.Stat(filename)
 	if os.IsNotExist(err) {
-		_, err := os.OpenFile(filename, os.O_CREATE, 0644)
+		file, err := os.OpenFile(filename, os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Println("Failed to create file ", err)
 		}
+		file.Close()
 	}
 
 	_, err = os.Stat(logFileName)
 	if os.IsNotExist(err) {
-		_, err := os.OpenFile(logFileName, os.O_CREATE, 0644)
+		file, err := os.OpenFile(logFileName, os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Println("Failed to create log file ", err)
 		}
+		file.Close()
 	}
 
 	_, err = os.Stat(metadataFileName)
 	if os.IsNotExist(err) {
-		_, err := os.OpenFile(metadataFileName, os.O_CREATE, 0644)
+		file, err := os.OpenFile(metadataFileName, os.O_CREATE, 0644)
 		if err != nil {
 			fmt.Println("Failed to create meta data file ", err)
 		}
+		file.Close()
 	}
 
 	err = Init(serverIndex)
