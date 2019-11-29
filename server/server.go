@@ -9,7 +9,6 @@
 package main
 
 import (
-	"atomic"
 	"bufio"
 	"errors"
 	"fmt"
@@ -68,26 +67,23 @@ var me RaftServer
 
 type RaftServer struct {
 	// who am I?
-	serverIndex int  // my ID
-	alive       bool // am I serving data?
+	serverIndex int // my ID
 	logs        []LogEntry
 
 	// when is it?
 	currentTerm       int   // start value could be 0 (init from persistent storage during start)
 	serverVotedFor    int   // where is this even being used? -- TODO: check this, May be separate variable defined for this
 	lastMessageTime   int64 // time in nanoseconds
-	responses         []Vote
-	commitIndex       int // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
+	commitIndex       int   // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
 	lastAppliedIndex  int
 	lastLogEntryIndex int //TODO: init from persistent storage on start
 	lastLogEntryTerm  int //TODO: init from persistent storage on start
 
 	// elections
-	leaderIndex             int  // the current leader
-	electionMinTime         int  // time in nanoseconds
-	electionMaxTime         int  // time in nanoseconds
-	discardThisElection     bool // set to true when someone else became leader while we requested votes
-	leaderHeartBeatDuration int  // TODO: init this (time in millisecond) // DOUBT: isn't this just range(electionMinTime, electionMaxTime)?
+	leaderIndex             int // the current leader
+	electionMinTime         int // time in nanoseconds
+	electionMaxTime         int // time in nanoseconds
+	leaderHeartBeatDuration int // TODO: init this (time in millisecond) // DOUBT: isn't this just range(electionMinTime, electionMaxTime)?
 
 	// Log replication -- structures needed at leader
 	// would be init in leader election
@@ -95,18 +91,6 @@ type RaftServer struct {
 	matchIndex [numServers]int // not sure where this is used -- but keeping it for now (initialize to 0)
 
 	mux sync.Mutex
-}
-
-// Initializes servers for their first run.
-func (rs RaftServer) init() nil {
-	rs.electionMinTime = 150 * time.Millisecond
-	rs.electionMaxTime = 300 * time.Millisecond
-}
-
-type Vote struct {
-	source  int
-	target  int
-	granted bool
 }
 
 //LogEntry ... This entry goes in the log file
@@ -132,16 +116,15 @@ type AppendEntriesReturn struct {
 }
 
 type RequestVoteArgs struct {
-	candidateIndex int
-	candidateTerm  int
-	lastLogIndex   int
-	lastLogTerm    int
+	CandidateIndex int
+	CandidateTerm  int
+	LastLogIndex   int
+	LastLogTerm    int
 }
 
 type RequestVoteResponse struct {
-	currentTerm int
-	voteGranted bool
-	done        bool
+	CurrentTerm int
+	VoteGranted bool
 }
 
 //GetKey ... Leader only servers this request always
@@ -176,6 +159,8 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 		me.mux.Lock()
 
 		// if successful, apply log entry to the file (fetch the value of the key from the file for get)
+		// TODO: how to ensure order in which entries are committed -- can index 12 commit before 11 is committed
+		// What's the possibility of using No-op here?
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
 		me.lastAppliedIndex = me.commitIndex
 
@@ -330,7 +315,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	// heartbeat
 	if len(args.Entries) == 0 {
 		me.mux.Lock()
-		defer me.mux.Unlock()
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
 			me.currentTerm = args.LeaderTerm
@@ -344,6 +328,8 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 				fmt.Println("Unable to write the new metadata information", err)
 				return err
 			}
+		} else {
+			me.mux.Unlock()
 		}
 		return nil
 	}
@@ -358,7 +344,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	}
 
 	// if a new leader asked us to join their cluster, do so. (this is to stop leader election if this server is candidating an election)
-	me.discardElectionCycle = true
 	me.currentTerm = args.LeaderTerm
 
 	me.leaderIndex = args.LeaderID
@@ -404,31 +389,32 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 // need to maintain what was the last term voted for
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
-func (t *Task) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
+func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
 	// we're on the remote server now.
-
+	fmt.Println("calling request vote - ", args.LastLogIndex, args.LastLogTerm, me.lastLogEntryIndex, me.lastLogEntryTerm)
 	// Reply false if candidateTerm < currentTerm
-	if args.candidateTerm < me.currentTerm {
+	if args.CandidateTerm < me.currentTerm {
+		reply.CurrentTerm = me.currentTerm
+		reply.VoteGranted = false
 		return nil
 	}
 
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
 	// also update the currentTerm to the newly voted term and update the votedFor
-	if me.serverVotedFor == nil || me.serverVotedFor == args.candidateId {
-		if args.lastLogTerm > me.currentTerm {
-			// if I'm outdated, remote has my vote.
-			me.serverVotedFor = args.candidateId
-			reply.voteGranted = true
-		} else if args.lastLogTerm == me.currentTerm {
-			// if remote is as new or newer, remote has my vote
-			if args.lastLogIndex >= me.lastLogEntryIndex {
-				me.serverVotedFor = args.candidateId
-				reply.voteGranted = true
-			}
-		}
-	}
+	if args.CandidateTerm > me.currentTerm || me.serverVotedFor == -1 || me.serverVotedFor == args.CandidateIndex {
 
-	reply.done = true
+		if args.LastLogTerm > me.lastLogEntryTerm || (args.LastLogTerm == me.lastLogEntryTerm && args.LastLogIndex >= me.lastLogEntryIndex) {
+			// if I'm outdated, remote has my vote.
+			// TODO: Also add to persistent storage
+			me.serverVotedFor = args.CandidateIndex
+			me.currentTerm = args.CandidateTerm
+			reply.CurrentTerm = me.currentTerm
+			reply.VoteGranted = true
+		}
+	} else {
+		reply.CurrentTerm = me.currentTerm
+		reply.VoteGranted = false
+	}
 
 	return nil
 }
@@ -445,8 +431,7 @@ func sendLeaderHeartbeats() error {
 					if err != nil {
 						fmt.Println("Leader unable to create connection with another server ", err)
 					} else {
-						appendEntriesResult = &AppendEntriesReturn{CurrentTerm: me.currentTerm, Success: true}
-
+						var appendEntriesResult AppendEntriesReturn
 						// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
 						client.Go("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
 							PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
@@ -518,103 +503,98 @@ func LeaderElection() error {
 	// in an infinite loop, check if currentTime - me.lastMessageTime > electionTimeout, initiate election
 	// sleep for electionTimeout
 	// probably need to extend the sleep/waiting time everytime me.lastMessageTime is received (variable value can change in AppendEntries)
-	for me.alive {
-		me.discardThisElection = false
+
+	for {
 		var lastNap = rand.Intn(me.electionMaxTime-me.electionMinTime) + me.electionMinTime
+		fmt.Println("server nap time - ", me.serverIndex, lastNap)
 		var asleep = time.Now().UnixNano()
-		time.Sleep(time.Duration(lastNap) * time.Millisecond)
+		time.Sleep(time.Duration(lastNap) * time.Nanosecond)
 
 		// no election necessary if the last message was received after we went to sleep.
 		if me.lastMessageTime > asleep {
+			fmt.Println("I got the hearbeat")
 			continue
 		}
 
 		/*
 		 * oy, it's election time!
 		 */
-		var electionTimeout = (time.Now().UnixNano()) + int64(rand.Intn(me.electionMaxTime-me.electionMinTime)+me.electionMinTime)
+		// var electionTimeout = (time.Now().UnixNano()) + int64(rand.Intn(me.electionMaxTime-me.electionMinTime)+me.electionMinTime)
 		// For leaderElection: Increment currentTerm
+		me.mux.Lock()
 		me.currentTerm++
+		currentElectionTerm := me.currentTerm
+		lastLogEntryTerm := me.lastLogEntryTerm
+		lastLogEntryIndex := me.lastLogEntryIndex
+		me.mux.Unlock()
 
 		// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
 		// forget the responses we've received so far.
-		me.responses = me.responses[:0]
+		var requestVoteResponses [numServers]RequestVoteResponse
+
+		type LE struct {
+			mux             sync.Mutex
+			majorityCounter int
+			wg              sync.WaitGroup
+		}
+		var le LE
+		le.majorityCounter = majoritySize - 1
+		le.wg.Add(1)
 
 		// request a vote from every client
 		for index := range config {
-			if time.Now().UnixNano() > electionTimeout {
-				continue
-			}
+			if index != me.serverIndex {
+				go func(index int) {
+					client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
+					if err != nil {
+						fmt.Println("Leader unable to create connection with another server ", err)
+					} else {
+						defer client.Close()
 
-			client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
-			if err != nil {
-				fmt.Println("Leader unable to create connection with another server ", err)
-			} else {
-				defer client.Close()
-
-				var voteRequest = RequestVoteArgs{
-					candidateIndex: me.serverIndex,
-					candidateTerm:  me.currentTerm,
-					lastLogIndex:   me.lastLogEntryIndex,
-					lastLogTerm:    me.lastLogEntryTerm,
-				}
-				me.responses[index] = RequestVoteResponse{}
-				client.Go("Task.RequestVote", voteRequest, &me.responses[index])
+						var voteRequest = RequestVoteArgs{
+							CandidateIndex: me.serverIndex,
+							CandidateTerm:  currentElectionTerm,
+							LastLogIndex:   lastLogEntryIndex,
+							LastLogTerm:    lastLogEntryTerm,
+						}
+						err := client.Call("RaftServer.RequestVote", voteRequest, &requestVoteResponses[index])
+						if requestVoteResponses[index].VoteGranted {
+							fmt.Println(2)
+							le.mux.Lock()
+							le.majorityCounter--
+							if le.majorityCounter == 0 {
+								le.wg.Done()
+							}
+							le.mux.Unlock()
+						} else {
+							fmt.Println(err)
+							fmt.Println("terms - ", currentElectionTerm, requestVoteResponses[index].CurrentTerm)
+							fmt.Println(3)
+							if requestVoteResponses[index].CurrentTerm > currentElectionTerm {
+								me.mux.Lock()
+								me.currentTerm = int(math.Max(float64(me.currentTerm), float64(requestVoteResponses[index].CurrentTerm)))
+								if le.majorityCounter > 0 {
+									le.majorityCounter = -1
+									le.wg.Done()
+								}
+								me.mux.Unlock()
+							}
+						}
+					}
+				}(index)
 			}
 		}
-
-		// collect vote responses
-		for responseCount := 0; (responseCount < numServers) && (time.Now().UnixNano() < electionTimeout); {
-			responseCount = 0
-
-			for index, response := range me.responses {
-				if response.done {
-					responseCount++
-				}
-			}
-
-			if responseCount < numServers {
-				time.Sleep(time.Duration(int(math.Min(float64(25), float64(time.Now().UnixNano()-electionTimeout/10)))) * time.Millisecond) // wait a ms...
-			}
-		}
-
-		// if no leader was elected within the timeout, start a new election cycle
-		// or, if we somehow got more votes than the cluster contains, throw out the results.
-		if (len(me.responses) < numServers && time.Now().UnixNano() > electionTimeout) || (len(me.responses) > numServers) || me.discardThisElection {
-			continue
-		}
-
-		// enough votes were collected to tally.
-		var myVotes = 0
-		// If majority true response received, change leaderIndex = serverIndex
-		if len(me.responses) == numServers {
-			for _, vote := range me.responses {
-				if (vote.target == me.serverIndex) && vote.granted {
-					myVotes++
-				}
-			}
-
-			// then I won the election.
-			if myVotes > majoritySize {
-
-				// Reinit entries for matchIndex = 0 and nextIndex = last log index + 1 array for all servers
-				// TODO trim log here.
-
-				// Send AppendEntires Heartbeat RPC to all servers to announce the leadership, also call sendLeaderHeartbeats() asynchronously from here and just let it running
-				go sendLeaderHeartbeats()
-
-				// if receiver's term is greater then, currentTerm is returned, update your current term and continue: handled in AppendEntries, line 352.
-				return nil
-			}
+		// ToDo - handle the split vote timeout
+		le.wg.Wait()
+		if currentElectionTerm == me.currentTerm {
+			fmt.Println(4)
+			me.mux.Lock()
+			me.leaderIndex = me.serverIndex
+			fmt.Println("new leader elected - ", me.serverIndex)
+			me.mux.Unlock()
+			go sendLeaderHeartbeats()
 		}
 	}
-
-	return nil
-}
-
-// Call from LeaderElection? -- Not sure if we are using this
-func CheckConsistencySafety() error {
-	return nil
 }
 
 // Called from PutKey, Also during heartbeat from leader every leaderHeartBeatDuration
@@ -725,12 +705,12 @@ func Init(index int) error {
 	err := rpc.Register(&me)
 
 	me.serverIndex = index
-	me.leaderIndex = 0
-	me.alive = true
+	me.leaderIndex = -1
 
 	// TODO: can keep the lastAppliedIndex and commitIndex in metadata files
 	me.lastAppliedIndex = -1
 	me.commitIndex = -1
+	me.serverVotedFor = -1
 
 	me.nextIndex[0] = 0
 	me.matchIndex[0] = 0
@@ -762,7 +742,7 @@ func Init(index int) error {
 
 	// TODO: call leader election function asynchronously so that it's non blocking
 	// call applyCommittedEntries asynchronously so that it keeps running in the background
-	// go LeaderElection()
+	go LeaderElection()
 	// me.responses = make([]Vote, 10)
 	go applyCommittedEntries() // running this over a separate thread for indefinite time
 	// go sendLeaderHeartbeats()
@@ -792,7 +772,6 @@ func Init(index int) error {
 func main() {
 	args := os.Args[1:]
 	serverIndex, _ := strconv.Atoi(args[0])
-	me.init()
 
 	// TODO: initialise the last log entry index, current term, serverVotedFor etc by reading from persistent storage
 	pid := os.Getpid()
