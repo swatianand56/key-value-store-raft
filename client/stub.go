@@ -22,13 +22,14 @@ type KeyValuePair struct {
 //export kv739_init
 func kv739_init(serverListArg []string, length int) int {
 	//TODO: can you work without length argument?
-	for index, _ := range serverListArg {
+	for index := range serverListArg {
 		serverList = serverListArg
 		address := serverList[index]
 		client, err = rpc.DialHTTP("tcp", address)
 		if err != nil {
 			if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
 				fmt.Println("Connection error: ", err)
+				continue
 			} else {
 				return -1
 			}
@@ -122,7 +123,6 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 
 //export kv739_put
 func kv739_put(key string, value string, oldValue *string) int {
-	fmt.Printf("hello")
 	err := client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
 	if err != nil {
 		fmt.Println(err)

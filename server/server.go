@@ -76,14 +76,14 @@ type RaftServer struct {
 	lastMessageTime   int64 // time in nanoseconds
 	commitIndex       int   // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
 	lastAppliedIndex  int
-	lastLogEntryIndex int //TODO: init from persistent storage on start
+	lastLogEntryIndex int
 	lastLogEntryTerm  int //TODO: init from persistent storage on start
 
 	// elections
 	leaderIndex             int // the current leader
 	electionMinTime         int // time in nanoseconds
 	electionMaxTime         int // time in nanoseconds
-	leaderHeartBeatDuration int // TODO: init this (time in millisecond) // DOUBT: isn't this just range(electionMinTime, electionMaxTime)?
+	leaderHeartBeatDuration int
 
 	// Log replication -- structures needed at leader
 	// would be init in leader election
@@ -142,6 +142,7 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		writeLogEntryInMemory(LogEntry{Key: key, Value: "", TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
+
 		me.mux.Unlock()
 
 		err := writeEntryToLogFile()
@@ -209,8 +210,8 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
 
 		writeLogEntryInMemory(LogEntry{Key: keyValue.Key, Value: keyValue.Value, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
-		me.mux.Unlock()
 
+		me.mux.Unlock()
 		err := writeEntryToLogFile()
 		if err != nil {
 			return err
@@ -360,7 +361,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		}
 	}
 
-	// TODO: remove all log entries from lines after the matched logIndex
 	me.logs = me.logs[:args.PrevLogIndex+1]
 
 	for i := 0; i < len(args.Entries); i++ {
@@ -452,7 +452,6 @@ func applyCommittedEntries() {
 	serverFileName := config[me.serverIndex]["filename"]
 	logFileName := config[me.serverIndex]["logfile"]
 	for {
-		// fmt.Println(len(me.logs), me.lastAppliedIndex, me.commitIndex)
 		if me.lastAppliedIndex < me.commitIndex {
 			me.lastAppliedIndex++
 
@@ -582,32 +581,15 @@ func LeaderElection() error {
 				}(index)
 			}
 		}
-		timeout := 100 * time.Millisecond
-		if !waitTimeout(&le.wg, timeout) {
-			if currentElectionTerm == me.currentTerm {
-				fmt.Println(4)
-				me.mux.Lock()
-				me.leaderIndex = me.serverIndex
-				fmt.Println("new leader elected - ", me.serverIndex)
-				me.mux.Unlock()
-				go sendLeaderHeartbeats()
-			}
+		le.wg.Wait()
+		if currentElectionTerm == me.currentTerm {
+			fmt.Println(4)
+			me.mux.Lock()
+			me.leaderIndex = me.serverIndex
+			fmt.Println("new leader elected - ", me.serverIndex)
+			me.mux.Unlock()
+			go sendLeaderHeartbeats()
 		}
-	}
-}
-
-// handling timeout for waitgroup
-func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
-	c := make(chan struct{})
-	go func() {
-		defer close(c)
-		wg.Wait()
-	}()
-	select {
-	case <-c:
-		return false // completed normally
-	case <-time.After(timeout):
-		return true // timed out
 	}
 }
 
@@ -669,8 +651,11 @@ func LogReplication(lastLogEntryIndex int) error {
 						err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
 							if appendEntriesReturn.Success {
+								me.mux.Lock()
 								me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
 								me.nextIndex[server] = me.matchIndex[server] + 1
+								me.mux.Unlock()
+
 								lr.mux.Lock()
 								lr.majorityCounter--
 								if lr.majorityCounter == 0 {
@@ -680,11 +665,11 @@ func LogReplication(lastLogEntryIndex int) error {
 								break
 							} else {
 								if appendEntriesReturn.CurrentTerm > me.currentTerm {
-									// TODO: unknown leaderIndex = -1, check for array index out of bounds error
+									me.mux.Lock()
 									me.leaderIndex = -1 // if current term of the server is greater than leader term, the current leader will become the follower.
 									// Doubt: though this might not save the actual leader index.
 									me.currentTerm = appendEntriesReturn.CurrentTerm
-									// TODO: exit this with an error here: will wg.Wait() cause problems for this?
+									me.mux.Unlock()
 									err = errors.New("Leader has changed state to follower, so consensus cannot be reached")
 									lr.mux.Lock()
 									if lr.majorityCounter > 0 {
@@ -694,15 +679,12 @@ func LogReplication(lastLogEntryIndex int) error {
 									lr.mux.Unlock()
 									break
 								}
-								me.nextIndex[server] = me.nextIndex[server] - 1
 								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
-								// LogReplication(lastLogEntryIndex)
+								me.nextIndex[server] = me.nextIndex[server] - 1
 							}
 						} else {
 							fmt.Printf("error from append entry \n")
 							fmt.Printf("%s ", err)
-							// TODO: calling for all the servers, only do for one server
-							// LogReplication(lastLogEntryIndex)
 						}
 					}
 				}
@@ -752,14 +734,10 @@ func Init(index int) error {
 		me.logs = append(me.logs, thisLog)
 	}
 
-	me.lastLogEntryIndex = len(lines) - 1
+	me.lastLogEntryIndex = len(lines)
 
-	// TODO: call leader election function asynchronously so that it's non blocking
-	// call applyCommittedEntries asynchronously so that it keeps running in the background
 	go LeaderElection()
-	// me.responses = make([]Vote, 10)
 	go applyCommittedEntries() // running this over a separate thread for indefinite time
-	// go sendLeaderHeartbeats()
 
 	if err != nil {
 		fmt.Println("Format of service Task isn't correct. ", err)
@@ -791,7 +769,6 @@ func main() {
 	pid := os.Getpid()
 	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
 
-	// TODO: Create server file and log file if not already present
 	filename := config[serverIndex]["filename"]
 	logFileName := config[serverIndex]["logfile"]
 	metadataFileName := config[serverIndex]["metadata"]
