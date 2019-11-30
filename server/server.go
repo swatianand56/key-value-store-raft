@@ -236,6 +236,7 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 
 		return nil
 	}
+	fmt.Println("throwing error to putkey request ", me.leaderIndex)
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
 
@@ -255,9 +256,9 @@ func writeDataInFile() error {
 
 func writeEntryToLogFile() error {
 	lines := []string{}
-	me.mux.Lock()
+	// me.mux.Lock()
 	logs := me.logs
-	me.mux.Unlock()
+	// me.mux.Unlock()
 
 	for _, log := range logs {
 		logstr := log.Key + "," + log.Value + "," + log.TermID + "," + log.IndexID
@@ -296,20 +297,23 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
 	metadataFile := config[me.serverIndex]["metadata"]
 
+	fmt.Println("leaderIndex is -------- ", args.LeaderID)
+
 	me.mux.Lock()
+	defer me.mux.Unlock()
 	me.lastMessageTime = time.Now().UnixNano()
-	me.mux.Unlock()
+	// me.mux.Unlock()
 
 	// heartbeat
 	if len(args.Entries) == 0 {
-		me.mux.Lock()
+		// me.mux.Lock()
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
 			me.currentTerm = args.LeaderTerm
 			me.leaderIndex = args.LeaderID
 			reply.CurrentTerm = args.LeaderTerm
 			me.serverVotedFor = -1
-			me.mux.Unlock()
+			// me.mux.Unlock()
 			lines := [2]string{strconv.Itoa(args.LeaderTerm), "-1"}
 			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
 			if err != nil {
@@ -317,12 +321,12 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 				return err
 			}
 		} else {
-			me.mux.Unlock()
+			// me.mux.Unlock()
 		}
 		return nil
 	}
 
-	me.mux.Lock()
+	// me.mux.Lock()
 
 	// return false if recipient's term > leader's term
 	if me.currentTerm > args.LeaderTerm {
@@ -363,7 +367,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	me.lastLogEntryIndex, _ = strconv.Atoi(args.Entries[len(args.Entries)-1].IndexID)
 	me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 
-	me.mux.Unlock()
+	// me.mux.Unlock()
 
 	err = writeEntryToLogFile()
 	if err != nil {
@@ -417,6 +421,22 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 	return nil
 }
 
+func sendHeartbeat(i int) {
+	// send appendentries heartbeat rpc in async and no need to wait for response
+	client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
+	if err != nil {
+		fmt.Println("Leader unable to create connection with another server ", err)
+	} else {
+		defer client.Close()
+		var appendEntriesResult AppendEntriesReturn
+		// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
+		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
+			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
+			&appendEntriesResult)
+
+	}
+}
+
 // when calling this method use the go func format? -- this would launch it on a separate thread -- not sure how this would be different from the normal operation though (can experiment)
 func sendLeaderHeartbeats() error {
 	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
@@ -424,21 +444,22 @@ func sendLeaderHeartbeats() error {
 		if me.serverIndex == me.leaderIndex {
 			for i := 0; i < len(config); i++ {
 				if i != me.serverIndex {
-					go func(i int) {
-						// send appendentries heartbeat rpc in async and no need to wait for response
-						client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
-						if err != nil {
-							fmt.Println("Leader unable to create connection with another server ", err)
-						} else {
-							defer client.Close()
-							var appendEntriesResult AppendEntriesReturn
-							// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
-							client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
-								PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
-								&appendEntriesResult)
+					go sendHeartbeat(i)
+					// go func(i int) {
+					// 	// send appendentries heartbeat rpc in async and no need to wait for response
+					// 	client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
+					// 	if err != nil {
+					// 		fmt.Println("Leader unable to create connection with another server ", err)
+					// 	} else {
+					// 		defer client.Close()
+					// 		var appendEntriesResult AppendEntriesReturn
+					// 		// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
+					// 		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
+					// 			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
+					// 			&appendEntriesResult)
 
-						}
-					}(i)
+					// 	}
+					// }(i)
 				}
 			}
 		} else {
@@ -512,6 +533,7 @@ func LeaderElection() error {
 		// var electionTimeout = (time.Now().UnixNano()) + int64(rand.Intn(me.electionMaxTime-me.electionMinTime)+me.electionMinTime)
 		// For leaderElection: Increment currentTerm
 		me.mux.Lock()
+		fmt.Println("leader election lock acquired")
 		me.currentTerm++
 		currentElectionTerm := me.currentTerm
 		lastLogEntryTerm := me.lastLogEntryTerm
@@ -521,7 +543,7 @@ func LeaderElection() error {
 		metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
 		err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
 		if err != nil {
-			fmt.Println("Unable to write the new metadata information", err)
+			fmt.Println("inside leader election - Unable to write the new metadata information", err)
 		}
 
 		// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
