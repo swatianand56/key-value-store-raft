@@ -12,11 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math"
 	"math/rand"
 	"net"
-	"net/http"
 	"net/rpc"
 	"os"
 	"strconv"
@@ -304,6 +302,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// heartbeat
 	if len(args.Entries) == 0 {
+		fmt.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 		// me.mux.Lock()
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
@@ -324,6 +323,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		return nil
 	}
 
+	fmt.Println("+++++++++++++++++++++++++++++++++++=")
 	// me.mux.Lock()
 
 	// return false if recipient's term > leader's term
@@ -429,16 +429,37 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 
 func sendHeartbeat(i int) {
 	// send appendentries heartbeat rpc in async and no need to wait for response
-	client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
+	conn, err := net.DialTimeout("tcp", config[i]["host"]+":"+config[i]["port"], 100*time.Millisecond)
 	if err != nil {
 		fmt.Println("Leader unable to create connection with another server ", err)
 	} else {
+
+		conn.SetDeadline(time.Now().Add(100 * time.Millisecond))
+		client := rpc.NewClient(conn)
 		defer client.Close()
+		defer conn.Close()
 		var appendEntriesResult AppendEntriesReturn
-		// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
+		fmt.Println("calling heartbeat")
 		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
 			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
 			&appendEntriesResult)
+
+		// c := make(chan error, 1)
+		// go func() {
+		// 	c <- client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
+		// 		PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
+		// 		&appendEntriesResult)
+		// }()
+		// select {
+		// case err := <-c:
+		// 	// use err and result
+		// 	if err != nil {
+		// 		fmt.Println("Heartbeat error ------- ", err)
+		// 	}
+		// case <-time.After(150 * time.Millisecond):
+		// call timed out
+		// }
+		// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
 
 	}
 }
@@ -569,11 +590,16 @@ func LeaderElection() error {
 		for index := range config {
 			if index != me.serverIndex {
 				go func(index int) {
-					client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
+					// client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
+					conn, err := net.DialTimeout("tcp", config[index]["host"]+":"+config[index]["port"], 300*time.Millisecond)
+
 					if err != nil {
 						fmt.Println("Candidate unable to create connection with another server ", err)
 					} else {
+						client := rpc.NewClient(conn)
+						conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
 						defer client.Close()
+						defer conn.Close()
 
 						var voteRequest = RequestVoteArgs{
 							CandidateIndex: me.serverIndex,
@@ -582,6 +608,8 @@ func LeaderElection() error {
 							LastLogTerm:    lastLogEntryTerm,
 						}
 						err := client.Call("RaftServer.RequestVote", voteRequest, &requestVoteResponses[index])
+
+						fmt.Println("request vote response received ================= ", index, requestVoteResponses[index])
 						if err != nil {
 							fmt.Println("Error in request vote", err)
 						}
@@ -650,6 +678,7 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication(lastLogEntryIndex int) error {
 	// filePath := config[me.serverIndex]["logfile"]
+	fmt.Println("{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{")
 	type LR struct {
 		mux             sync.Mutex
 		majorityCounter int
@@ -693,12 +722,15 @@ func LogReplication(lastLogEntryIndex int) error {
 
 					var appendEntriesReturn AppendEntriesReturn
 
-					client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
+					conn, err := net.DialTimeout("tcp", config[server]["host"]+":"+config[server]["port"], 200*time.Millisecond)
 					if err != nil {
 						fmt.Println("Leader unable to make connection for log replication", err)
 						break
 					} else {
+						conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
+						client := rpc.NewClient(conn)
 						defer client.Close()
+						defer conn.Close()
 						err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
 							if appendEntriesReturn.Success {
@@ -753,6 +785,32 @@ func LogReplication(lastLogEntryIndex int) error {
 	// me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
 	return err
 }
+
+// arith := new(Arith)
+// rpc.Register(arith)
+
+// tcpAddr, err := net.ResolveTCPAddr("tcp", ":1234")
+// checkError(err)
+
+// listener, err := net.ListenTCP("tcp", tcpAddr)
+// checkError(err)
+
+// for {
+// 	conn, err := listener.Accept()
+// 	if err != nil {
+// 		continue
+// 	}
+// 	rpc.ServeConn(conn)
+// }
+
+// }
+
+// func checkError(err error) {
+// if err != nil {
+// 	fmt.Println("Fatal error ", err.Error())
+// 	os.Exit(1)
+// }
+// }
 
 //Init ... takes in config and index of the current server in config
 func Init(index int) error {
@@ -828,22 +886,33 @@ func Init(index int) error {
 		fmt.Println("Format of service Task isn't correct. ", err)
 	}
 
+	tcpAddr, err := net.ResolveTCPAddr("tcp", ":"+config[index]["port"])
+
 	// Register a HTTP handler
-	rpc.HandleHTTP()
+	// rpc.HandleHTTP()
 
 	// Listen to TPC connections on port 1234
-	listener, e := net.Listen("tcp", config[index]["host"]+":"+config[index]["port"])
-	if e != nil {
-		fmt.Println("Listen error: ", e)
-	}
-	log.Println("Serving RPC server on port", config[index]["port"])
-
-	// Start accept incoming HTTP connections
-	err = http.Serve(listener, nil)
+	// listener, e := net.Listen("tcp", config[index]["host"]+":"+config[index]["port"])
+	listener, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
-		fmt.Println("Error serving: ", err)
+		fmt.Println("Listen error: ", err)
 	}
-	return nil
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			continue
+		}
+		go rpc.ServeConn(conn)
+	}
+	// log.Println("Serving RPC server on port", config[index]["port"])
+
+	// // Start accept incoming HTTP connections
+	// err = http.Serve(listener, nil)
+	// if err != nil {
+	// 	fmt.Println("Error serving: ", err)
+	// }
+	// return nil
 }
 
 func main() {
