@@ -236,7 +236,7 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 
 		return nil
 	}
-	fmt.Println("throwing error to putkey request ", me.leaderIndex)
+	// fmt.Println("throwing error to putkey request ", me.leaderIndex)
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
 
@@ -297,8 +297,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
 	metadataFile := config[me.serverIndex]["metadata"]
 
-	fmt.Println("leaderIndex is -------- ", args.LeaderID)
-
 	me.mux.Lock()
 	defer me.mux.Unlock()
 	me.lastMessageTime = time.Now().UnixNano()
@@ -309,11 +307,11 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		// me.mux.Lock()
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
-			me.currentTerm = args.LeaderTerm
 			me.leaderIndex = args.LeaderID
 			reply.CurrentTerm = args.LeaderTerm
-			me.serverVotedFor = -1
 			// me.mux.Unlock()
+			me.currentTerm = args.LeaderTerm
+			me.serverVotedFor = -1
 			lines := [2]string{strconv.Itoa(args.LeaderTerm), "-1"}
 			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
 			if err != nil {
@@ -336,13 +334,15 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	}
 
 	// if a new leader asked us to join their cluster, do so. (this is to stop leader election if this server is candidating an election)
-	me.currentTerm = args.LeaderTerm
 	me.leaderIndex = args.LeaderID
-
-	metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
-	err := ioutil.WriteFile(metadataFile, []byte(strings.Join(metadataContent[:], "\n")), 0)
-	if err != nil {
-		fmt.Println("Unable to write the new metadata information", err)
+	if me.currentTerm != args.LeaderTerm {
+		me.currentTerm = args.LeaderTerm
+		me.serverVotedFor = -1
+		metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
+		err := ioutil.WriteFile(metadataFile, []byte(strings.Join(metadataContent[:], "\n")), 0)
+		if err != nil {
+			fmt.Println("Unable to write the new metadata information", err)
+		}
 	}
 
 	for i := len(me.logs) - 1; i >= 0; i-- {
@@ -369,7 +369,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// me.mux.Unlock()
 
-	err = writeEntryToLogFile()
+	err := writeEntryToLogFile()
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		reply.Success = false
@@ -395,11 +395,17 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 		return nil
 	}
 
+	me.mux.Lock()
+	mycurrentTerm := me.currentTerm
+	myserverVotedFor := me.serverVotedFor
+	mylastLogEntryIndex := me.lastLogEntryIndex
+	mylastLogEntryTerm := me.lastLogEntryTerm
+	me.mux.Unlock()
+
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
 	// also update the currentTerm to the newly voted term and update the votedFor
-	if args.CandidateTerm > me.currentTerm || me.serverVotedFor == -1 || me.serverVotedFor == args.CandidateIndex {
-
-		if args.LastLogTerm > me.lastLogEntryTerm || (args.LastLogTerm == me.lastLogEntryTerm && args.LastLogIndex >= me.lastLogEntryIndex) {
+	if args.CandidateTerm > mycurrentTerm || myserverVotedFor == -1 || myserverVotedFor == args.CandidateIndex {
+		if args.LastLogTerm > mylastLogEntryTerm || (args.LastLogTerm == mylastLogEntryTerm && args.LastLogIndex >= mylastLogEntryIndex) {
 			// if I'm outdated, remote has my vote.
 			me.mux.Lock()
 			me.serverVotedFor = args.CandidateIndex
@@ -655,29 +661,34 @@ func LogReplication(lastLogEntryIndex int) error {
 	var err error
 	for index := range config {
 		if index != me.serverIndex {
-
-			var logEntries []LogEntry
-
-			// prepare logs to send
-			for j := me.nextIndex[index]; j < len(me.logs); j++ {
-				logEntries = append(logEntries, me.logs[j])
-			}
-
-			prevlogIndex := me.nextIndex[index] - 1
-			prevlogTerm := "0"
-			if prevlogIndex != -1 {
-				prevlogTerm = me.logs[prevlogIndex].TermID
-			}
 			go func(server int) {
+				var logEntries []LogEntry
+
+				// prepare logs to send
+				me.mux.Lock()
+				for j := me.nextIndex[index]; j < len(me.logs); j++ {
+					logEntries = append(logEntries, me.logs[j])
+				}
+
+				prevlogIndex := me.nextIndex[index] - 1
+				prevlogTerm := "0"
+				if prevlogIndex != -1 {
+					prevlogTerm = me.logs[prevlogIndex].TermID
+				}
+				var leaderCurrentTerm = me.currentTerm
+				var leaderIndex = me.leaderIndex
+				var leaderCommitIndex = me.commitIndex
+				me.mux.Unlock()
+
 				for {
 					prevlogTermInt, _ := strconv.Atoi(prevlogTerm)
 					appendEntriesArgs := &AppendEntriesArgs{
-						LeaderTerm:        me.currentTerm,
-						LeaderID:          me.leaderIndex,
+						LeaderTerm:        leaderCurrentTerm,
+						LeaderID:          leaderIndex,
 						PrevLogIndex:      prevlogIndex,
 						PrevLogTerm:       prevlogTermInt,
 						Entries:           logEntries,
-						LeaderCommitIndex: me.commitIndex,
+						LeaderCommitIndex: leaderCommitIndex,
 					}
 
 					var appendEntriesReturn AppendEntriesReturn
@@ -739,7 +750,7 @@ func LogReplication(lastLogEntryIndex int) error {
 		}
 	}
 	lr.wg.Wait()
-	me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
+	// me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
 	return err
 }
 
