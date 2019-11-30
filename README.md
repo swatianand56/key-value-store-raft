@@ -16,6 +16,8 @@ https://github.com/emichael/dslabs
 
 ### Alternate Raft Implementations
 
+We could probably use these as sources for further tests.
+
 https://raft.github.io/
 
 | Repository                         | License        | Election | Membership | Compaction | Updated    |
