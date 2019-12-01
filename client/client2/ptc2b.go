@@ -15,10 +15,28 @@ func ptc2b() {
 	// var start_time = time.Now()
 	var oldValue string
 
-	for i := 3333; i < 6666; i++ {
+	for i := 1000; i < 2000; i++ {
 		var key = strconv.Itoa(i)
 		kv739_put(key, key, &oldValue)
 		fmt.Println(key)
 	}
+
+	var not_found = 0
+	var wrong_values_count = 0
+
+	for i := 333; i < 666; i++ {
+		var key = strconv.Itoa(i)
+		var x = kv739_get(key, &oldValue)
+		if x == -1 {
+			not_found++
+		}
+
+		if key != oldValue {
+			fmt.Println("wrong value\n", key, oldValue)
+			wrong_values_count++
+		}
+	}
+	fmt.Println("Keys Not Found => ", not_found)
+	fmt.Println("Value wrong Found =>", wrong_values_count)
 	fmt.Println("done ptc2b")
 }

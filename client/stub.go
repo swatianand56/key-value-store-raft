@@ -25,34 +25,13 @@ type KeyValuePair struct {
 //export kv739_init
 func kv739_init(serverListArg []string, length int) int {
 	//TODO: can you work without length argument?
-	for index := range serverListArg {
-		serverList = serverListArg
-		// address := serverList[index]
-		leaderIndex = index
-		// conn, err := net.DialTimeout("tcp", address, 250*time.Millisecond)
-		// if err != nil {
-		// 	if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
-		// 		fmt.Println("Connection error: ", err)
-		// 		continue
-		// 	} else {
-		// 		return -1
-		// 	}
-		// }
-		// client := rpc.NewClient(conn)
-		// defer client.Close()
-		// defer conn.Close()
-		return 0
-	}
-	return -1
+	serverList = serverListArg
+	leaderIndex = 0
+	return 0
 }
 
 //export kv739_shutdown
 func kv739_shutdown() int {
-	// err := client.Close()
-	// if err != nil {
-	// 	fmt.Println("Unable to shutdown client connection: ", err)
-	// 	return -1
-	// }
 	return 0
 }
 
@@ -64,6 +43,7 @@ func executeGetKey(key string, value *string, address string) int {
 		client = rpc.NewClient(conn)
 		defer client.Close()
 		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
 		err = client.Call("RaftServer.GetKey", key, value)
 		if err == nil {
 			if len(*value) > 0 {
@@ -92,6 +72,7 @@ func executeGetKey(key string, value *string, address string) int {
 			return getResult
 		}
 	}
+	fmt.Println("Error in get key", err)
 	return -1
 }
 
@@ -118,8 +99,8 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 		client = rpc.NewClient(conn)
 		defer client.Close()
 		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
 		err = client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
-		fmt.Println("executePutKey ======", err)
 		if err == nil {
 			if len(*oldValue) > 0 {
 				return 0

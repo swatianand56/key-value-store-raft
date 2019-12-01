@@ -25,23 +25,23 @@ func ptc1() {
 	}
 	// var end_time = time.Now()
 
-	// var not_found = 0
-	// var wrong_values_count = 0
+	var not_found = 0
+	var wrong_values_count = 0
 
-	// for i := 0; i < number_of_keys; i++ {
-	// 	var key = strconv.Itoa(i)
-	// 	var x = kv739_get(key, &oldValue)
-	// 	if x == -1 {
-	// 		not_found++
-	// 	}
+	for i := 0; i < number_of_keys; i++ {
+		var key = strconv.Itoa(i)
+		var x = kv739_get(key, &oldValue)
+		if x == -1 {
+			not_found++
+		}
 
-	// 	if key != oldValue {
-	// 		fmt.Println("wrong value\n", key, oldValue)
-	// 		wrong_values_count++
-	// 	}
-	// }
-	// fmt.Println("Keys Not Found => ", not_found)
-	// fmt.Println("Value wrong Found =>", wrong_values_count)
+		if key != oldValue {
+			fmt.Println("wrong value\n", key, oldValue)
+			wrong_values_count++
+		}
+	}
+	fmt.Println("Keys Not Found => ", not_found)
+	fmt.Println("Value wrong Found =>", wrong_values_count)
 
 	// var time_elapsed = int(end_time.Sub(start_time))
 	// var throughput = number_of_keys / time_elapsed
