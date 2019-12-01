@@ -12,11 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math"
 	"math/rand"
 	"net"
-	"net/http"
 	"net/rpc"
 	"os"
 	"strconv"
@@ -137,40 +135,38 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 		me.mux.Lock()
 		me.lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
-
 		writeLogEntryInMemory(LogEntry{Key: key, Value: "", TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
-
+		logs := me.logs
 		me.mux.Unlock()
 
-		err := writeEntryToLogFile()
+		err := writeEntryToLogFile(logs)
 		if err != nil {
 			return err
 		}
 
-		err = LogReplication(me.lastLogEntryIndex)
+		err = LogReplication(logEntryIndex)
 		if err != nil {
 			fmt.Println("Unable to replicate the get request to a majority of servers", err)
 			return err
 		}
-
 		me.mux.Lock()
-
 		// if successful, apply log entry to the file (fetch the value of the key from the file for get)
 		// TODO: how to ensure order in which entries are committed -- can index 12 commit before 11 is committed
 		// What's the possibility of using No-op here?
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
 		me.lastAppliedIndex = me.commitIndex
-
 		// fetch the value of the key
-		for i := 0; i < (len(me.data)); i++ {
-			data := me.data[i]
-			if data.Key == key {
-				*value = data.Value
+		data := me.data
+		me.mux.Unlock()
+
+		for i := 0; i < (len(data)); i++ {
+			line := data[i]
+			if line.Key == key {
+				*value = line.Value
 				return nil
 			}
 		}
 
-		me.mux.Unlock()
 		return nil
 	}
 	// cannot find a way to transfer connection to another server, so throwing error with leaderIndex
@@ -190,14 +186,13 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	// return response to the client
 	if me.serverIndex == me.leaderIndex {
 		me.mux.Lock()
-
 		me.lastLogEntryIndex++                // what about 2 parallel requests trying to use the same logEntryIndex (this is a shared variable -- do we need locks here?)
 		logEntryIndex := me.lastLogEntryIndex // these 2 steps should be atomic
-
 		writeLogEntryInMemory(LogEntry{Key: keyValue.Key, Value: keyValue.Value, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)})
-
+		logs := me.logs
 		me.mux.Unlock()
-		err := writeEntryToLogFile()
+
+		err := writeEntryToLogFile(logs)
 		if err != nil {
 			return err
 		}
@@ -223,13 +218,13 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		if !keyFound {
 			me.data = append(me.data, keyValue)
 		}
-
 		// Once it has been applied to the server file, we can set the commit index to the lastLogEntryIndex (should be kept here in the local variable to avoid conflicts with the parallel requests that might update it?)
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
 		me.lastAppliedIndex = me.commitIndex
+		data := me.data
 		me.mux.Unlock()
 
-		err = writeDataInFile()
+		err = writeDataInFile(data)
 		if err != nil {
 			return err
 		}
@@ -240,31 +235,25 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
 
-func writeDataInFile() error {
+func writeDataInFile(totalData []KeyValuePair) error {
 	lines := []string{}
-	me.mux.Lock()
-	totalData := me.data
-	me.mux.Unlock()
-
 	for _, data := range totalData {
 		datastr := data.Key + "," + data.Value
 		lines = append(lines, datastr)
 	}
 	err := ioutil.WriteFile(config[me.serverIndex]["filename"], []byte(strings.Join(lines[:], "\n")), 0)
+
 	return err
 }
 
-func writeEntryToLogFile() error {
+func writeEntryToLogFile(logs []LogEntry) error {
 	lines := []string{}
-	// me.mux.Lock()
-	logs := me.logs
-	// me.mux.Unlock()
-
 	for _, log := range logs {
 		logstr := log.Key + "," + log.Value + "," + log.TermID + "," + log.IndexID
 		lines = append(lines, logstr)
 	}
 	err := ioutil.WriteFile(config[me.serverIndex]["logfile"], []byte(strings.Join(lines[:], "\n")), 0)
+
 	return err
 }
 
@@ -305,21 +294,27 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	// heartbeat
 	if len(args.Entries) == 0 {
 		// me.mux.Lock()
+		reply.CurrentTerm = args.LeaderTerm
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
+		if args.LeaderTerm == me.currentTerm && me.leaderIndex == -1 {
+			me.leaderIndex = args.LeaderID
+		}
 		if args.LeaderTerm > me.currentTerm {
 			me.leaderIndex = args.LeaderID
-			reply.CurrentTerm = args.LeaderTerm
 			// me.mux.Unlock()
 			me.currentTerm = args.LeaderTerm
-			me.serverVotedFor = -1
-			lines := [2]string{strconv.Itoa(args.LeaderTerm), "-1"}
+			me.serverVotedFor = args.LeaderID
+			lines := [2]string{strconv.Itoa(args.LeaderTerm), strconv.Itoa(me.serverVotedFor)}
 			err := ioutil.WriteFile(metadataFile, []byte(strings.Join(lines[:], "\n")), 0)
 			if err != nil {
 				fmt.Println("Unable to write the new metadata information", err)
 				return err
 			}
-		} else {
+		} else if args.LeaderTerm == me.currentTerm && me.leaderIndex == -1 {
+			me.leaderIndex = args.LeaderID
 			// me.mux.Unlock()
+		} else if args.LeaderTerm < me.currentTerm {
+			reply.CurrentTerm = me.currentTerm
 		}
 		return nil
 	}
@@ -369,7 +364,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// me.mux.Unlock()
 
-	err := writeEntryToLogFile()
+	err := writeEntryToLogFile(me.logs)
 	if err != nil {
 		fmt.Println("Unable to replicate the log in appendEntries", err)
 		reply.Success = false
@@ -386,21 +381,21 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
 func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
-	// we're on the remote server now.
-	fmt.Println("calling request vote - ", args.LastLogIndex, args.LastLogTerm, me.lastLogEntryIndex, me.lastLogEntryTerm)
-	// Reply false if candidateTerm < currentTerm
-	if args.CandidateTerm < me.currentTerm {
-		reply.CurrentTerm = me.currentTerm
-		reply.VoteGranted = false
-		return nil
-	}
 
 	me.mux.Lock()
 	mycurrentTerm := me.currentTerm
 	myserverVotedFor := me.serverVotedFor
 	mylastLogEntryIndex := me.lastLogEntryIndex
 	mylastLogEntryTerm := me.lastLogEntryTerm
+	myserverIndex := me.serverIndex
 	me.mux.Unlock()
+
+	// Reply false if candidateTerm < currentTerm
+	if args.CandidateTerm < mycurrentTerm {
+		reply.CurrentTerm = mycurrentTerm
+		reply.VoteGranted = false
+		return nil
+	}
 
 	// If votedFor is null or candidateIndex, and candidate's log is as up-to-date (greater term index, same term greater log index) then grant vote
 	// also update the currentTerm to the newly voted term and update the votedFor
@@ -410,17 +405,18 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 			me.mux.Lock()
 			me.serverVotedFor = args.CandidateIndex
 			me.currentTerm = args.CandidateTerm
+			me.leaderIndex = -1
 			me.mux.Unlock()
-			reply.CurrentTerm = me.currentTerm
+			reply.CurrentTerm = args.CandidateTerm
 			reply.VoteGranted = true
-			metadataContent := [2]string{strconv.Itoa(me.currentTerm), strconv.Itoa(me.serverVotedFor)}
-			err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+			metadataContent := [2]string{strconv.Itoa(args.CandidateTerm), strconv.Itoa(args.CandidateIndex)}
+			err := ioutil.WriteFile(config[myserverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
 			if err != nil {
-				fmt.Println("Request Vote RPC: Unable to write to metadata file ", me.serverIndex, me.currentTerm, me.serverVotedFor)
+				fmt.Println("Request Vote RPC: Unable to write to metadata file ", myserverIndex, mycurrentTerm, args.CandidateIndex)
 			}
 		}
 	} else {
-		reply.CurrentTerm = me.currentTerm
+		reply.CurrentTerm = mycurrentTerm
 		reply.VoteGranted = false
 	}
 
@@ -429,17 +425,31 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 
 func sendHeartbeat(i int) {
 	// send appendentries heartbeat rpc in async and no need to wait for response
-	client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
+	conn, err := net.DialTimeout("tcp", config[i]["host"]+":"+config[i]["port"], 150*time.Millisecond)
 	if err != nil {
 		fmt.Println("Leader unable to create connection with another server ", err)
 	} else {
+		conn.SetDeadline(time.Now().Add(150 * time.Millisecond))
+		client := rpc.NewClient(conn)
 		defer client.Close()
+		defer conn.Close()
 		var appendEntriesResult AppendEntriesReturn
-		// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
-		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
-			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
+
+		me.mux.Lock()
+		mycurrentTerm := me.currentTerm
+		myserverIndex := me.serverIndex
+		mylastAppliedIndex := me.lastAppliedIndex
+		me.mux.Unlock()
+		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: mycurrentTerm, LeaderID: myserverIndex,
+			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: mylastAppliedIndex},
 			&appendEntriesResult)
 
+		if appendEntriesResult.CurrentTerm > me.currentTerm {
+			me.mux.Lock()
+			me.currentTerm = appendEntriesResult.CurrentTerm
+			me.leaderIndex = -1
+			me.mux.Unlock()
+		}
 	}
 }
 
@@ -451,21 +461,6 @@ func sendLeaderHeartbeats() error {
 			for i := 0; i < len(config); i++ {
 				if i != me.serverIndex {
 					go sendHeartbeat(i)
-					// go func(i int) {
-					// 	// send appendentries heartbeat rpc in async and no need to wait for response
-					// 	client, err := rpc.DialHTTP("tcp", config[i]["host"]+":"+config[i]["port"])
-					// 	if err != nil {
-					// 		fmt.Println("Leader unable to create connection with another server ", err)
-					// 	} else {
-					// 		defer client.Close()
-					// 		var appendEntriesResult AppendEntriesReturn
-					// 		// Assuming for a leader, commit index = lastappliedindex, values that are not needed for heartbeat are simply passed as -1
-					// 		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: me.currentTerm, LeaderID: me.serverIndex,
-					// 			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: me.lastAppliedIndex},
-					// 			&appendEntriesResult)
-
-					// 	}
-					// }(i)
 				}
 			}
 		} else {
@@ -501,9 +496,10 @@ func applyCommittedEntries() {
 					me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
 				}
 			}
+			data := me.data
 			me.mux.Unlock()
 
-			err := writeDataInFile()
+			err := writeDataInFile(data)
 			if err != nil {
 				fmt.Println("error in writing data at file", err)
 			}
@@ -531,23 +527,22 @@ func LeaderElection() error {
 			continue
 		}
 
-		fmt.Println("Starting Leader Election", me.serverIndex)
-
 		/*
 		 * oy, it's election time!
 		 */
 		// var electionTimeout = (time.Now().UnixNano()) + int64(rand.Intn(me.electionMaxTime-me.electionMinTime)+me.electionMinTime)
 		// For leaderElection: Increment currentTerm
 		me.mux.Lock()
-		fmt.Println("leader election lock acquired")
 		me.currentTerm++
+		me.serverVotedFor = me.serverIndex
 		currentElectionTerm := me.currentTerm
 		lastLogEntryTerm := me.lastLogEntryTerm
 		lastLogEntryIndex := me.lastLogEntryIndex
+		myserverIndex := me.serverIndex
 		me.mux.Unlock()
 
-		metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
-		err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+		metadataContent := [2]string{strconv.Itoa(currentElectionTerm), strconv.Itoa(myserverIndex)}
+		err := ioutil.WriteFile(config[myserverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
 		if err != nil {
 			fmt.Println("inside leader election - Unable to write the new metadata information", err)
 		}
@@ -567,21 +562,27 @@ func LeaderElection() error {
 
 		// request a vote from every client
 		for index := range config {
-			if index != me.serverIndex {
+			if index != myserverIndex {
 				go func(index int) {
-					client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
+					// client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
+					conn, err := net.DialTimeout("tcp", config[index]["host"]+":"+config[index]["port"], 200*time.Millisecond)
+
 					if err != nil {
 						fmt.Println("Candidate unable to create connection with another server ", err)
 					} else {
+						client := rpc.NewClient(conn)
+						conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
 						defer client.Close()
+						defer conn.Close()
 
 						var voteRequest = RequestVoteArgs{
-							CandidateIndex: me.serverIndex,
+							CandidateIndex: myserverIndex,
 							CandidateTerm:  currentElectionTerm,
 							LastLogIndex:   lastLogEntryIndex,
 							LastLogTerm:    lastLogEntryTerm,
 						}
 						err := client.Call("RaftServer.RequestVote", voteRequest, &requestVoteResponses[index])
+
 						if err != nil {
 							fmt.Println("Error in request vote", err)
 						}
@@ -595,17 +596,26 @@ func LeaderElection() error {
 						} else {
 							if requestVoteResponses[index].CurrentTerm > currentElectionTerm {
 								me.mux.Lock()
-								me.currentTerm = int(math.Max(float64(me.currentTerm), float64(requestVoteResponses[index].CurrentTerm)))
+								changedTerm := false
+								if me.currentTerm < requestVoteResponses[index].CurrentTerm {
+									changedTerm = true
+									me.currentTerm = requestVoteResponses[index].CurrentTerm
+									me.leaderIndex = -1
+									metadataContent = [2]string{strconv.Itoa(me.currentTerm), "-1"}
+								}
+								me.mux.Unlock()
+								le.mux.Lock()
 								if le.majorityCounter > 0 {
 									le.majorityCounter = -1
 									le.wg.Done()
 								}
-								me.mux.Unlock()
+								le.mux.Unlock()
 
-								metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
-								err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
-								if err != nil {
-									fmt.Println("Unable to write the new metadata information", err)
+								if changedTerm {
+									err := ioutil.WriteFile(config[myserverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
+									if err != nil {
+										fmt.Println("Unable to write the new metadata information", err)
+									}
 								}
 							}
 						}
@@ -618,7 +628,11 @@ func LeaderElection() error {
 			if currentElectionTerm == me.currentTerm {
 				me.mux.Lock()
 				me.leaderIndex = me.serverIndex
-				fmt.Println("new leader elected - ", me.serverIndex)
+				length := len(me.logs)
+				for i := range config {
+					me.nextIndex[i] = length
+					me.matchIndex[i] = 0
+				}
 				me.mux.Unlock()
 				go sendLeaderHeartbeats()
 			}
@@ -662,25 +676,27 @@ func LogReplication(lastLogEntryIndex int) error {
 	for index := range config {
 		if index != me.serverIndex {
 			go func(server int) {
-				var logEntries []LogEntry
-
-				// prepare logs to send
-				me.mux.Lock()
-				for j := me.nextIndex[index]; j < len(me.logs); j++ {
-					logEntries = append(logEntries, me.logs[j])
-				}
-
-				prevlogIndex := me.nextIndex[index] - 1
-				prevlogTerm := "0"
-				if prevlogIndex != -1 {
-					prevlogTerm = me.logs[prevlogIndex].TermID
-				}
-				var leaderCurrentTerm = me.currentTerm
-				var leaderIndex = me.leaderIndex
-				var leaderCommitIndex = me.commitIndex
-				me.mux.Unlock()
-
 				for {
+					var logEntries []LogEntry
+
+					// prepare logs to send
+					me.mux.Lock()
+					for j := me.nextIndex[server]; j < int(math.Min(float64(me.nextIndex[server]+1000), float64(len(me.logs)))); j++ {
+						logEntries = append(logEntries, me.logs[j])
+					}
+
+					fmt.Println("next index ====> ", me.nextIndex[server], len(logEntries), len(me.logs))
+
+					prevlogIndex := me.nextIndex[server] - 1
+					prevlogTerm := "0"
+					if prevlogIndex != -1 {
+						prevlogTerm = me.logs[prevlogIndex].TermID
+					}
+					var leaderCurrentTerm = me.currentTerm
+					var leaderIndex = me.leaderIndex
+					var leaderCommitIndex = me.commitIndex
+					me.mux.Unlock()
+
 					prevlogTermInt, _ := strconv.Atoi(prevlogTerm)
 					appendEntriesArgs := &AppendEntriesArgs{
 						LeaderTerm:        leaderCurrentTerm,
@@ -693,17 +709,21 @@ func LogReplication(lastLogEntryIndex int) error {
 
 					var appendEntriesReturn AppendEntriesReturn
 
-					client, err := rpc.DialHTTP("tcp", config[server]["host"]+":"+config[server]["port"])
+					conn, err := net.DialTimeout("tcp", config[server]["host"]+":"+config[server]["port"], 200*time.Millisecond)
 					if err != nil {
 						fmt.Println("Leader unable to make connection for log replication", err)
 						break
 					} else {
+						conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
+						client := rpc.NewClient(conn)
 						defer client.Close()
+						defer conn.Close()
 						err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
+							fmt.Println("received response for =====", lastLogEntryIndex, appendEntriesReturn)
 							if appendEntriesReturn.Success {
 								me.mux.Lock()
-								me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
+								me.matchIndex[server] = prevlogIndex + len(logEntries)
 								me.nextIndex[server] = me.matchIndex[server] + 1
 								me.mux.Unlock()
 
@@ -715,11 +735,12 @@ func LogReplication(lastLogEntryIndex int) error {
 								lr.mux.Unlock()
 								break
 							} else {
-								if appendEntriesReturn.CurrentTerm > me.currentTerm {
+								if appendEntriesReturn.CurrentTerm > leaderCurrentTerm {
 									me.mux.Lock()
 									me.leaderIndex = -1 // if current term of the server is greater than leader term, the current leader will become the follower.
 									// Doubt: though this might not save the actual leader index.
 									me.currentTerm = appendEntriesReturn.CurrentTerm
+									metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
 									me.mux.Unlock()
 
 									err = errors.New("Leader has changed state to follower, so consensus cannot be reached")
@@ -730,16 +751,16 @@ func LogReplication(lastLogEntryIndex int) error {
 									}
 									lr.mux.Unlock()
 
-									metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
 									err := ioutil.WriteFile(config[me.serverIndex]["metadata"], []byte(strings.Join(metadataContent[:], "\n")), 0)
 									if err != nil {
 										fmt.Println("Unable to write the new metadata information", err)
 									}
-
 									break
 								}
 								// next heartbeat request will send the new log entries starting from nextIndex[server] - 1
+								me.mux.Lock()
 								me.nextIndex[server] = me.nextIndex[server] - 1
+								me.mux.Unlock()
 							}
 						} else {
 							fmt.Println("error from append entry", err)
@@ -749,8 +770,8 @@ func LogReplication(lastLogEntryIndex int) error {
 			}(index)
 		}
 	}
-	lr.wg.Wait()
-	// me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
+	timeout := 500 * time.Millisecond
+	waitTimeout(&lr.wg, timeout)
 	return err
 }
 
@@ -769,8 +790,8 @@ func Init(index int) error {
 	me.matchIndex[0] = 0
 
 	me.leaderHeartBeatDuration = 150
-	me.electionMaxTime = 400000000
-	me.electionMinTime = 250000000
+	me.electionMaxTime = 500000000
+	me.electionMinTime = 350000000
 
 	fileContent, _ := ioutil.ReadFile(config[me.serverIndex]["logfile"])
 	lines := []string{}
@@ -778,13 +799,7 @@ func Init(index int) error {
 		lines = strings.Split(string(fileContent), "\n")
 	}
 
-	if me.serverIndex == me.leaderIndex {
-		for index := range config {
-			me.nextIndex[index] = len(lines)
-			me.matchIndex[index] = 0
-		}
-	}
-
+	fmt.Println("length of logs ======> ", len(lines))
 	for index := range lines {
 		line := strings.Split(lines[index], ",")
 		thisLog := LogEntry{Key: line[0], Value: line[1], TermID: line[2], IndexID: line[3]}
@@ -828,22 +843,25 @@ func Init(index int) error {
 		fmt.Println("Format of service Task isn't correct. ", err)
 	}
 
+	tcpAddr, err := net.ResolveTCPAddr("tcp", ":"+config[index]["port"])
+
 	// Register a HTTP handler
-	rpc.HandleHTTP()
+	// rpc.HandleHTTP()
 
 	// Listen to TPC connections on port 1234
-	listener, e := net.Listen("tcp", config[index]["host"]+":"+config[index]["port"])
-	if e != nil {
-		fmt.Println("Listen error: ", e)
-	}
-	log.Println("Serving RPC server on port", config[index]["port"])
-
-	// Start accept incoming HTTP connections
-	err = http.Serve(listener, nil)
+	// listener, e := net.Listen("tcp", config[index]["host"]+":"+config[index]["port"])
+	listener, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
-		fmt.Println("Error serving: ", err)
+		fmt.Println("Listen error: ", err)
 	}
-	return nil
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			continue
+		}
+		go rpc.ServeConn(conn)
+	}
 }
 
 func main() {
