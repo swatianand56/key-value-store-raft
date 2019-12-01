@@ -289,19 +289,13 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	me.mux.Lock()
 	defer me.mux.Unlock()
 	me.lastMessageTime = time.Now().UnixNano()
-	// me.mux.Unlock()
 
 	// heartbeat
 	if len(args.Entries) == 0 {
-		// me.mux.Lock()
 		reply.CurrentTerm = args.LeaderTerm
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
-		if args.LeaderTerm == me.currentTerm && me.leaderIndex == -1 {
-			me.leaderIndex = args.LeaderID
-		}
 		if args.LeaderTerm > me.currentTerm {
 			me.leaderIndex = args.LeaderID
-			// me.mux.Unlock()
 			me.currentTerm = args.LeaderTerm
 			me.serverVotedFor = args.LeaderID
 			lines := [2]string{strconv.Itoa(args.LeaderTerm), strconv.Itoa(me.serverVotedFor)}
@@ -312,14 +306,11 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 			}
 		} else if args.LeaderTerm == me.currentTerm && me.leaderIndex == -1 {
 			me.leaderIndex = args.LeaderID
-			// me.mux.Unlock()
 		} else if args.LeaderTerm < me.currentTerm {
 			reply.CurrentTerm = me.currentTerm
 		}
 		return nil
 	}
-
-	// me.mux.Lock()
 
 	// return false if recipient's term > leader's term
 	if me.currentTerm > args.LeaderTerm {
