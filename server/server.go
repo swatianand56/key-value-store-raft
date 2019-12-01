@@ -283,6 +283,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// check if the entries is null, then this is a heartbeat and check for the leader and update the current term and leader if not on track and update the timeout time for leader election
 	metadataFile := config[me.serverIndex]["metadata"]
+	fmt.Println("received append entries request ======", args)
 
 	me.mux.Lock()
 	defer me.mux.Unlock()
@@ -291,7 +292,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	// heartbeat
 	if len(args.Entries) == 0 {
-		fmt.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 		// me.mux.Lock()
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
@@ -312,7 +312,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		return nil
 	}
 
-	fmt.Println("+++++++++++++++++++++++++++++++++++=")
 	// me.mux.Lock()
 
 	// return false if recipient's term > leader's term
@@ -643,7 +642,7 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 // I think, logEntries will depend on next index index of the server, so need to send any logentries in this function as parameter.
 func LogReplication(lastLogEntryIndex int) error {
 	// filePath := config[me.serverIndex]["logfile"]
-	fmt.Println("{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{")
+	fmt.Println("{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{ ==========", lastLogEntryIndex)
 	type LR struct {
 		mux             sync.Mutex
 		majorityCounter int
@@ -656,25 +655,27 @@ func LogReplication(lastLogEntryIndex int) error {
 	for index := range config {
 		if index != me.serverIndex {
 			go func(server int) {
-				var logEntries []LogEntry
-
-				// prepare logs to send
-				me.mux.Lock()
-				for j := me.nextIndex[index]; j < len(me.logs); j++ {
-					logEntries = append(logEntries, me.logs[j])
-				}
-
-				prevlogIndex := me.nextIndex[index] - 1
-				prevlogTerm := "0"
-				if prevlogIndex != -1 {
-					prevlogTerm = me.logs[prevlogIndex].TermID
-				}
-				var leaderCurrentTerm = me.currentTerm
-				var leaderIndex = me.leaderIndex
-				var leaderCommitIndex = me.commitIndex
-				me.mux.Unlock()
-
 				for {
+					var logEntries []LogEntry
+
+					// prepare logs to send
+					me.mux.Lock()
+					for j := me.nextIndex[server]; j < int(math.Min(float64(me.nextIndex[server]+1000), float64(len(me.logs)))); j++ {
+						logEntries = append(logEntries, me.logs[j])
+					}
+
+					fmt.Println("next index ====> ", me.nextIndex[server], len(logEntries), len(me.logs))
+
+					prevlogIndex := me.nextIndex[server] - 1
+					prevlogTerm := "0"
+					if prevlogIndex != -1 {
+						prevlogTerm = me.logs[prevlogIndex].TermID
+					}
+					var leaderCurrentTerm = me.currentTerm
+					var leaderIndex = me.leaderIndex
+					var leaderCommitIndex = me.commitIndex
+					me.mux.Unlock()
+
 					prevlogTermInt, _ := strconv.Atoi(prevlogTerm)
 					appendEntriesArgs := &AppendEntriesArgs{
 						LeaderTerm:        leaderCurrentTerm,
@@ -698,6 +699,7 @@ func LogReplication(lastLogEntryIndex int) error {
 						defer conn.Close()
 						err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
+							fmt.Println("received response for =====", lastLogEntryIndex, appendEntriesReturn)
 							if appendEntriesReturn.Success {
 								me.mux.Lock()
 								me.matchIndex[server] = prevlogIndex + len(logEntries) - 1
@@ -747,7 +749,9 @@ func LogReplication(lastLogEntryIndex int) error {
 			}(index)
 		}
 	}
-	lr.wg.Wait()
+	timeout := 500 * time.Millisecond
+	waitTimeout(&lr.wg, timeout)
+	// lr.wg.Wait()
 	// me.commitIndex = int(math.Max(float64(lastLogEntryIndex), float64(me.commitIndex)))
 	return err
 }
