@@ -36,7 +36,7 @@ https://raft.github.io/
 
 - [ ] Membership Change.
 - [ ] Performance Testing (insert 10k keys, read 10k keys).
-- [ ] Test: Leader election (Raft, p3, s5.2).
+- [ ] Test: Nick: Leader election (Raft, p3, s5.2).
 - [ ] Test: Log Replication (Raft, p3, s5.2).
 - [ ] Test: Election Safety: only one leader electable (Raft, p5, s5.3).
 - [ ] Test: Leader Append-only: leaders reject requests to overwrite existing entries (p5, s5.3).
@@ -44,6 +44,11 @@ https://raft.github.io/
 - [ ] Test: Leader Completeness: All future leaders will contain all this term's committed entries (p5, s5.4).
 - [ ] Test: State Machine Safety: No other server will ever overwrite applied log entries (p5, s5.4.3).
 - [ ] Test: Network Partition: kill a leader, wait a few seconds, resume the old leader, verify new leader's entries are copied onto old leader.
+
+1. Write joint consensus algorithm
+2. Write joint consensus algorithm policy
+3. Write membership change code.
+4. Write test suite.
 
 For tests, use  [Golang Testing](https://golang.org/pkg/testing/) to run tests.  That process is simple, it looks for files that end in `_test.go` and runs functions with the right signature:
 

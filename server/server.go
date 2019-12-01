@@ -846,10 +846,7 @@ func Init(index int) error {
 	return nil
 }
 
-func main() {
-	args := os.Args[1:]
-	serverIndex, _ := strconv.Atoi(args[0])
-
+func runServer(serverIndex int) (RaftServer, error) {
 	pid := os.Getpid()
 	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
 
@@ -885,4 +882,13 @@ func main() {
 	}
 
 	err = Init(serverIndex)
+
+	return me, err
+}
+
+func main() {
+	args := os.Args[1:]
+	serverIndex, _ := strconv.Atoi(args[0])
+
+	runServer(serverIndex)
 }
