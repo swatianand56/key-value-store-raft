@@ -296,6 +296,9 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		// me.mux.Lock()
 		reply.CurrentTerm = args.LeaderTerm
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
+		if args.LeaderTerm == me.currentTerm && me.leaderIndex == -1 {
+			me.leaderIndex = args.LeaderID
+		}
 		if args.LeaderTerm > me.currentTerm {
 			me.leaderIndex = args.LeaderID
 			// me.mux.Unlock()
