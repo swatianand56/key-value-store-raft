@@ -43,6 +43,7 @@ https://raft.github.io/
 - [ ] Test: Log Matching: if any 2 servers log entries are equal, so are their preceding entries (p5, s5.3).
 - [ ] Test: Leader Completeness: All future leaders will contain all this term's committed entries (p5, s5.4).
 - [ ] Test: State Machine Safety: No other server will ever overwrite applied log entries (p5, s5.4.3).
+- [ ] Test: Network Partition: kill a leader, wait a few seconds, resume the old leader, verify new leader's entries are copied onto old leader.
 
 For tests, use  [Golang Testing](https://golang.org/pkg/testing/) to run tests.  That process is simple, it looks for files that end in `_test.go` and runs functions with the right signature:
 
