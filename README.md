@@ -32,6 +32,40 @@ https://raft.github.io/
 | github.com/mreiferson/pontoon      |                |          |            |            | 2013-09-02 |
 | github.com/lionelbarrow/seaturtles |                |          |            |            | 2013-09-02 |
 
+# TODOs
+
+- [ ] Membership Change.
+- [ ] Performance Testing (insert 10k keys, read 10k keys).
+- [ ] Test: Leader election (Raft, p3, s5.2).
+- [ ] Test: Log Replication (Raft, p3, s5.2).
+- [ ] Test: Election Safety: only one leader electable (Raft, p5, s5.3).
+- [ ] Test: Leader Append-only: leaders reject requests to overwrite existing entries (p5, s5.3).
+- [ ] Test: Log Matching: if any 2 servers log entries are equal, so are their preceding entries (p5, s5.3).
+- [ ] Test: Leader Completeness: All future leaders will contain all this term's committed entries (p5, s5.4).
+- [ ] Test: State Machine Safety: No other server will ever overwrite applied log entries (p5, s5.4.3).
+
+For tests, use  [Golang Testing](https://golang.org/pkg/testing/) to run tests.  That process is simple, it looks for files that end in `_test.go` and runs functions with the right signature:
+
+    func TestXxx(*testing.T)
+
+Like:
+
+    func TestAbs(t *testing.T) {
+        got := Abs(-1)
+        if got != 1 {
+            t.Errorf("Abs(-1) = %d; want 1", got)
+        }
+    }
+
+If additional setup code is required (such as starting servers), we can create a TestMain:
+
+    func TestMain(m *testing.M) {
+            // call flag.Parse() here if TestMain uses flags
+            os.Exit(m.Run())
+    }
+
+We could use that to set up servers and clients before making each of them send commands.
+
 # key-value-store-raft
 
 Key Value Store Implementation Using Raft Consensus Algorithm
