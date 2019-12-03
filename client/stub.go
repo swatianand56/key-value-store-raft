@@ -14,13 +14,7 @@ var err error
 var client *rpc.Client
 var leaderIndex int
 var reply string
-var serverList []string
 var conn net.Conn
-
-//KeyValuePair ... interface type
-type KeyValuePair struct {
-	Key, Value string
-}
 
 //export kv739_init
 func kv739_init(serverListArg []string, length int) int {
@@ -114,6 +108,7 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 			address = serverList[leaderIndex]
 			return executePutKey(key, value, oldValue, address)
 		} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+			// TODO doesn't the server reply with the new leader?  Shouldn't we read the response from the reply instead of iterating through the server list?
 			leaderIndex = (leaderIndex + 1) % len(serverList)
 			putResult := executePutKey(key, value, oldValue, serverList[leaderIndex])
 			if putResult != -1 {

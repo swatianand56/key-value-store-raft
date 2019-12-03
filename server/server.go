@@ -23,8 +23,6 @@ import (
 	"time"
 )
 
-const numServers = 3
-
 var majoritySize = int(math.Ceil(float64(numServers+1) / 2))
 
 // Make this dynamic initialization based on numServers
@@ -58,69 +56,6 @@ var config = []map[string]string{
 // var me.currentTerm int // start value could be 0 (init from persistent storage during start)
 
 var me RaftServer
-
-type RaftServer struct {
-	// who am I?
-	serverIndex int // my ID
-	logs        []LogEntry
-	data        []KeyValuePair
-
-	// when is it?
-	currentTerm       int // start value could be 0 (init from persistent storage during start)
-	serverVotedFor    int
-	lastMessageTime   int64 // time in nanoseconds
-	commitIndex       int   // DOUBT: index of the last committed entry (should these 2 be added to persistent storage as well? How are we going to tell till where is the entry applied in the log?)
-	lastAppliedIndex  int
-	lastLogEntryIndex int
-	lastLogEntryTerm  int
-
-	// elections
-	leaderIndex             int // the current leader
-	electionMinTime         int // time in nanoseconds
-	electionMaxTime         int // time in nanoseconds
-	leaderHeartBeatDuration int
-
-	// Log replication -- structures needed at leader
-	// would be init in leader election
-	nextIndex  [numServers]int // this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
-	matchIndex [numServers]int // not sure where this is used -- but keeping it for now (initialize to 0)
-
-	mux sync.Mutex
-}
-
-//LogEntry ... This entry goes in the log file
-// get operations are denoted by using blank value
-type LogEntry struct {
-	Key, Value, TermID, IndexID string
-}
-
-//KeyValuePair ... This entry goes in the state machine on commit
-type KeyValuePair struct {
-	Key, Value string
-}
-
-type AppendEntriesArgs struct {
-	LeaderTerm, LeaderID, PrevLogIndex, PrevLogTerm int
-	Entries                                         []LogEntry
-	LeaderCommitIndex                               int
-}
-
-type AppendEntriesReturn struct {
-	CurrentTerm int
-	Success     bool
-}
-
-type RequestVoteArgs struct {
-	CandidateIndex int
-	CandidateTerm  int
-	LastLogIndex   int
-	LastLogTerm    int
-}
-
-type RequestVoteResponse struct {
-	CurrentTerm int
-	VoteGranted bool
-}
 
 //GetKey ... Leader only servers this request always
 // If this server not the leader, redirect the request to the leader (How can client library know who the leader is?)
@@ -410,6 +345,36 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 		reply.CurrentTerm = mycurrentTerm
 		reply.VoteGranted = false
 	}
+
+	return nil
+}
+
+func (me *RaftServer) Sleep(ms time.Duration, slept *time.Duration) error {
+	// sleep for a while, then reply with how long we slept.
+	start := time.Now()
+
+	time.Sleep(ms * time.Millisecond)
+
+	*slept = time.Since(start)
+
+	return nil
+}
+
+func (me *RaftServer) CurrentState(input int, state *RaftServer) error {
+	// copies state from the server to return it for inspection.
+
+	fmt.Println("getting current state")
+	fmt.Println(me.currentTerm)
+
+	state.serverIndex = me.serverIndex // just in case I get *really* confused.
+	state.currentTerm = me.currentTerm
+	state.serverVotedFor = me.serverVotedFor
+	state.lastMessageTime = me.lastMessageTime
+	state.commitIndex = me.commitIndex
+	state.lastAppliedIndex = me.lastAppliedIndex
+	state.lastLogEntryIndex = me.lastLogEntryIndex
+	state.lastLogEntryTerm = me.lastLogEntryTerm
+	state.leaderIndex = me.leaderIndex
 
 	return nil
 }
