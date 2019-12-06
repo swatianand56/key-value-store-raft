@@ -15,6 +15,7 @@ var client *rpc.Client
 var leaderIndex int
 var reply string
 var conn net.Conn
+var serverList []string
 
 //export kv739_init
 func kv739_init(serverListArg []string, length int) int {

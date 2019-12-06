@@ -1,0 +1,25 @@
+{
+    "servers": [
+        {
+            "port":     "8001",
+            "host":     "localhost",
+            "filename": "./0.txt",
+            "logfile":  "./log-0.txt",
+            "metadata": "./metadata-0.txt"
+        },
+        {
+            "port":     "8002",
+            "host":     "localhost",
+            "filename": "./1.txt",
+            "logfile":  "./log-1.txt",
+            "metadata": "./metadata-1.txt"
+        },
+        {
+            "port":     "8003",
+            "host":     "localhost",
+            "filename": "./2.txt",
+            "logfile":  "./log-2.txt",
+            "metadata": "./metadata-2.txt"
+        }
+    ]
+}
