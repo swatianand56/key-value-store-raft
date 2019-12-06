@@ -20,7 +20,7 @@ type RaftServer struct {
 	lastLogEntryTerm  int
 
 	// elections
-	leaderIndex             int // the current leader
+	LeaderIndex             int // the current leader
 	electionMinTime         int // time in nanoseconds
 	electionMaxTime         int // time in nanoseconds
 	leaderHeartBeatDuration int

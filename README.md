@@ -35,9 +35,9 @@ https://raft.github.io/
 # TODOs
 
 - [ ] Membership Change.
-- [ ] Performance Testing (insert 10k keys, read 10k keys).
-- [ ] Test: Nick: Leader election: New leaders are elected when old ones fail (Raft, p3, s5.2).
-- [ ] Test: Log Replication (Raft, p3, s5.2).
+- [X] Performance Testing (insert 10k keys, read 10k keys).
+- [X] Test: Nick: Leader election: New leaders are elected when old ones fail (Raft, p3, s5.2).
+- [ ] Test: Log Replication: leader entries are replicated to clients (Raft, p3, s5.2).
 - [ ] Test: Election Safety: only one leader electable (Raft, p5, s5.3).
 - [ ] Test: Leader Append-only: leaders reject requests to overwrite existing entries (p5, s5.3).
 - [ ] Test: Log Matching: if any 2 servers log entries are equal, so are their preceding entries (p5, s5.3).

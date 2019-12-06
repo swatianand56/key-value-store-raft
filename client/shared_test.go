@@ -16,22 +16,21 @@ var serverList = []string{
 	"localhost:8003",
 }
 
-func ServerSleep(serverIndex int, ms time.Duration) (int, error) {
-	conn, err := net.DialTimeout("tcp", serverList[serverIndex], (ms+250)*time.Millisecond)
-	sleepTime := 0
+func ServerSleep(serverIndex int, sleepTime time.Duration, sleptTime *time.Duration) error {
+	conn, err := net.DialTimeout("tcp", serverList[serverIndex], (sleepTime+250)*time.Millisecond)
 
 	if err == nil {
 		client := rpc.NewClient(conn)
 		defer client.Close()
 		defer conn.Close()
-		conn.SetDeadline(time.Now().Add((ms + 250) * time.Millisecond))
-		err = client.Call("RaftServer.Sleep", ms, &sleepTime)
+		conn.SetDeadline(time.Now().Add((sleepTime + 250) * time.Millisecond))
+		err = client.Call("RaftServer.Sleep", sleepTime, &sleptTime)
 	}
 
-	return sleepTime, err
+	return err
 }
 
-func GetState(serverIndex int, serverState *RaftServer) error {
+func GetState(serverIndex int, serverState RaftServer) error {
 	conn, err := net.DialTimeout("tcp", serverList[serverIndex], 250*time.Millisecond)
 
 	if err == nil {
@@ -39,8 +38,24 @@ func GetState(serverIndex int, serverState *RaftServer) error {
 		defer client.Close()
 		defer conn.Close()
 		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
-		err = client.Call("RaftServer.CurrentState", nil, serverState)
+		err = client.Call("RaftServer.CurrentState", 0, &serverState)
 	}
+
+	return err
+}
+
+func ServerCall(serverCall string, serverIndex int, input interface{}, output interface{}) error {
+	conn, err := net.DialTimeout("tcp", serverList[serverIndex], 250*time.Millisecond)
+
+	if err == nil {
+		client := rpc.NewClient(conn)
+		defer client.Close()
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+		err = client.Call("RaftServer."+serverCall, input, output)
+	}
+
+	fmt.Println("ServerCall output:", output)
 
 	return err
 }
@@ -55,15 +70,15 @@ func ServerSetup() {
 
 	server0, err = os.StartProcess("../server/server", []string{"../server/server", "0"}, attr1)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Server 0 Error:", err)
 	}
 	server1, err = os.StartProcess("../server/server", []string{"../server/server", "1"}, attr2)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Server 1 Error:", err)
 	}
 	server2, err = os.StartProcess("../server/server", []string{"../server/server", "2"}, attr3)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("Server 2 Error:", err)
 	}
 }
 
