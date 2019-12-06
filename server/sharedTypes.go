@@ -2,8 +2,6 @@ package main
 
 import "sync"
 
-const numServers = 3
-
 type RaftServer struct {
 	// who am I?
 	serverIndex int // my ID
@@ -27,8 +25,8 @@ type RaftServer struct {
 
 	// Log replication -- structures needed at leader
 	// would be init in leader election
-	nextIndex  [numServers]int // this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
-	matchIndex [numServers]int // not sure where this is used -- but keeping it for now (initialize to 0)
+	nextIndex  map[int]int // this is to define which values to send for replication to each server during AppendEntries (initialize to last log index on leader + 1)
+	matchIndex map[int]int // not sure where this is used -- but keeping it for now (initialize to 0)
 
 	mux sync.Mutex
 }

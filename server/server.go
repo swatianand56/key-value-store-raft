@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var majoritySize = int(math.Ceil(float64(numServers+1) / 2))
+var activeServerFilename = "./activeServers.txt"
 
 // Make this dynamic initialization based on numServers
 
@@ -39,6 +39,8 @@ type ServerConfig struct {
 	LogFile  string `json:"logfile"`
 	Metadata string `json:"metadata"`
 }
+
+var activeServers []int
 
 var config Config
 
@@ -160,6 +162,10 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	// fmt.Println("throwing error to putkey request ", me.leaderIndex)
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
+
+// func (me *RaftServer) changeMembership() error {
+
+// }
 
 func writeDataInFile(totalData []KeyValuePair) error {
 	lines := []string{}
@@ -405,7 +411,7 @@ func sendLeaderHeartbeats() error {
 	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
 	for {
 		if me.serverIndex == me.leaderIndex {
-			for i := 0; i < len(config.Servers); i++ {
+			for _, i := range activeServers {
 				if i != me.serverIndex {
 					go sendHeartbeat(i)
 				}
@@ -496,7 +502,7 @@ func LeaderElection() error {
 
 		// Make RequestVote RPC calls to all other servers. (count its own vote +1) -- Do this async
 		// forget the responses we've received so far.
-		var requestVoteResponses [numServers]RequestVoteResponse
+		var requestVoteResponses = make(map[int]*RequestVoteResponse)
 
 		type LE struct {
 			mux             sync.Mutex
@@ -504,11 +510,13 @@ func LeaderElection() error {
 			wg              sync.WaitGroup
 		}
 		var le LE
-		le.majorityCounter = majoritySize - 1
+		le.majorityCounter = int(math.Ceil(float64(len(activeServers)+1)/2)) - 1
 		le.wg.Add(1)
 
 		// request a vote from every client
-		for index := range config.Servers {
+		for _, index := range activeServers {
+			requestVoteResponses[index] = new(RequestVoteResponse)
+
 			if index != myserverIndex {
 				go func(index int) {
 					// client, err := rpc.DialHTTP("tcp", config[index]["host"]+":"+config[index]["port"])
@@ -528,7 +536,7 @@ func LeaderElection() error {
 							LastLogIndex:   lastLogEntryIndex,
 							LastLogTerm:    lastLogEntryTerm,
 						}
-						err := client.Call("RaftServer.RequestVote", voteRequest, &requestVoteResponses[index])
+						err := client.Call("RaftServer.RequestVote", voteRequest, requestVoteResponses[index])
 
 						if err != nil {
 							fmt.Println("Error in request vote", err)
@@ -576,7 +584,7 @@ func LeaderElection() error {
 				me.mux.Lock()
 				me.leaderIndex = me.serverIndex
 				length := len(me.logs)
-				for i := range config.Servers {
+				for _, i := range activeServers {
 					me.nextIndex[i] = length
 					me.matchIndex[i] = 0
 				}
@@ -617,10 +625,10 @@ func LogReplication(lastLogEntryIndex int) error {
 		wg              sync.WaitGroup
 	}
 	var lr LR
-	lr.majorityCounter = majoritySize - 1 // leader counting it's own vote
+	lr.majorityCounter = int(math.Ceil(float64(len(activeServers)+1)/2)) - 1 // leader counting it's own vote
 	lr.wg.Add(1)
 	var err error
-	for index := range config.Servers {
+	for _, index := range activeServers {
 		if index != me.serverIndex {
 			go func(server int) {
 				for {
@@ -733,8 +741,8 @@ func Init(index int) error {
 	me.lastAppliedIndex = -1
 	me.commitIndex = -1
 
-	me.nextIndex[0] = 0
-	me.matchIndex[0] = 0
+	me.nextIndex = make(map[int]int)
+	me.matchIndex = make(map[int]int)
 
 	me.leaderHeartBeatDuration = 150
 	me.electionMaxTime = 500000000
@@ -861,9 +869,26 @@ func readConfigFile() {
 	json.Unmarshal(configValue, &config)
 }
 
+func readActiveServers() {
+	fileContent, err := ioutil.ReadFile(activeServerFilename)
+	if err != nil {
+		fmt.Println("Unable to read active server file", err)
+	}
+
+	fileContentLines := strings.Split(string(fileContent), "\n")
+	activeServersArr := strings.Split(fileContentLines[0], ",")
+	for _, server := range activeServersArr {
+		serverIndex, _ := strconv.Atoi(server)
+		activeServers = append(activeServers, serverIndex)
+	}
+
+	fmt.Println(activeServers)
+}
+
 func main() {
 	args := os.Args[1:]
 	serverIndex, _ := strconv.Atoi(args[0])
 	readConfigFile()
+	readActiveServers()
 	runServer(serverIndex)
 }

@@ -20,6 +20,13 @@
             "filename": "./2.txt",
             "logfile":  "./log-2.txt",
             "metadata": "./metadata-2.txt"
+        },
+        {
+            "port":     "8004",
+            "host":     "localhost",
+            "filename": "./3.txt",
+            "logfile":  "./log-3.txt",
+            "metadata": "./metadata-3.txt"
         }
     ]
 }
