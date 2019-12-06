@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var activeServerFilename = "./activeServers.txt"
+var activeServerFilename = "./activeServers.cfg"
 
 // Make this dynamic initialization based on numServers
 
