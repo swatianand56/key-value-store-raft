@@ -14,7 +14,7 @@ func TestLogReplication(t *testing.T) {
 	putRequest := &KeyValuePair{"akey", "avalue"}
 	var value *string
 
-	ServerSetup()
+	ServerSetup(0)
 
 	// let servers start up.
 	time.Sleep(500 * time.Millisecond)
