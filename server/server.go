@@ -227,10 +227,13 @@ func (me *RaftServer) ChangeMembership(newConfig []int) error {
 	me.lastAppliedIndex = me.commitIndex
 	me.activeServers = me.newServers
 	me.newServers = make([]int, 0)
-	//TODO: step down the leader if not in new config
 	me.mux.Unlock()
 
 	err = ioutil.WriteFile(activeServerFilename, []byte(newConfigStr), 0)
+
+	if !isElementPresentInArray(me.activeServers, me.serverIndex) {
+		me.leaderIndex = -1
+	}
 
 	if err != nil {
 		fmt.Println("could not write final config change to the server active servers file")
@@ -523,6 +526,9 @@ func applyCommittedEntries() {
 				me.activeServers = me.newServers
 				me.newServers = make([]int, 0)
 				me.mux.Unlock()
+				if !isElementPresentInArray(me.activeServers, me.serverIndex) {
+					os.Exit(1)
+				}
 			} else {
 				// Add/update key value pair to the server if it is only a put request
 				if value != "" {
