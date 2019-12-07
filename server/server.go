@@ -40,8 +40,6 @@ type ServerConfig struct {
 	Metadata string `json:"metadata"`
 }
 
-var activeServers []int
-
 var config Config
 
 // Persistent state on all servers: currentTerm, votedFor (candidate ID that received vote in current term)-- using a separate metadata file for this
@@ -163,9 +161,83 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
 
-// func (me *RaftServer) changeMembership() error {
+func (me *RaftServer) ChangeMembership(newConfig []int) error {
+	// create cold, new config (log replicate)
+	// new servers ()
+	me.mux.Lock()
+	me.lastLogEntryIndex = me.lastLogEntryIndex + 1
+	logEntryIndex := me.lastLogEntryIndex
+	newConfigStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(newConfig)), ","), "[]")
+	le := LogEntry{Key: "config-old-new", Value: newConfigStr, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)}
+	writeLogEntryInMemory(le)
+	me.newServers = newConfig
+	for _, i := range newConfig {
+		if !isElementPresentInArray(me.activeServers, i) {
+			me.nextIndex[i] = 0
+			me.matchIndex[i] = 0
+		}
+	}
+	logs := me.logs
+	me.mux.Unlock()
 
-// }
+	err := writeEntryToLogFile(logs)
+
+	if err != nil {
+		fmt.Println("err in config change", err)
+		me.newServers = make([]int, 0)
+		return err
+	}
+
+	err = LogReplication(logEntryIndex)
+
+	if err != nil {
+		fmt.Println("unable to replicate config changes to majority servers", err)
+		me.newServers = make([]int, 0)
+		return err
+	}
+
+	me.mux.Lock()
+	me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
+	me.lastAppliedIndex = me.commitIndex
+	me.lastLogEntryIndex = me.lastLogEntryIndex + 1
+	logEntryIndex = me.lastLogEntryIndex
+	le = LogEntry{Key: "config-new", Value: newConfigStr, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)}
+	writeLogEntryInMemory(le)
+	logs = me.logs
+	me.mux.Unlock()
+
+	err = writeEntryToLogFile(logs)
+
+	if err != nil {
+		fmt.Println("err in new config change", err)
+		me.newServers = make([]int, 0)
+		return err
+	}
+
+	err = LogReplication(logEntryIndex)
+
+	if err != nil {
+		fmt.Println("unable to replicate config new to majority servers", err)
+		me.newServers = make([]int, 0)
+		return err
+	}
+
+	me.mux.Lock()
+	me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
+	me.lastAppliedIndex = me.commitIndex
+	me.activeServers = me.newServers
+	me.newServers = make([]int, 0)
+	//TODO: step down the leader if not in new config
+	me.mux.Unlock()
+
+	err = ioutil.WriteFile(activeServerFilename, []byte(newConfigStr), 0)
+
+	if err != nil {
+		fmt.Println("could not write final config change to the server active servers file")
+	}
+
+	return nil
+}
 
 func writeDataInFile(totalData []KeyValuePair) error {
 	lines := []string{}
@@ -411,7 +483,7 @@ func sendLeaderHeartbeats() error {
 	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
 	for {
 		if me.serverIndex == me.leaderIndex {
-			for _, i := range activeServers {
+			for _, i := range me.activeServers {
 				if i != me.serverIndex {
 					go sendHeartbeat(i)
 				}
@@ -510,11 +582,11 @@ func LeaderElection() error {
 			wg              sync.WaitGroup
 		}
 		var le LE
-		le.majorityCounter = int(math.Ceil(float64(len(activeServers)+1)/2)) - 1
+		le.majorityCounter = int(math.Ceil(float64(len(me.activeServers)+1)/2)) - 1
 		le.wg.Add(1)
 
 		// request a vote from every client
-		for _, index := range activeServers {
+		for _, index := range me.activeServers {
 			requestVoteResponses[index] = new(RequestVoteResponse)
 
 			if index != myserverIndex {
@@ -584,7 +656,7 @@ func LeaderElection() error {
 				me.mux.Lock()
 				me.leaderIndex = me.serverIndex
 				length := len(me.logs)
-				for _, i := range activeServers {
+				for _, i := range me.activeServers {
 					me.nextIndex[i] = length
 					me.matchIndex[i] = 0
 				}
@@ -610,6 +682,25 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 	}
 }
 
+func isElementPresentInArray(array []int, ele int) bool {
+	for _, i := range array {
+		if i == ele {
+			return true
+		}
+	}
+	return false
+}
+
+func serversUnion(a []int, b []int) []int {
+	ret := a
+	for _, val := range b {
+		if !isElementPresentInArray(ret, val) {
+			ret = append(ret, val)
+		}
+	}
+	return ret
+}
+
 // Called from PutKey, Also during heartbeat from leader every leaderHeartBeatDuration
 // 2. Send AppendEntries to all other servers in async
 // 3. When majority response received, add to the server file
@@ -620,15 +711,22 @@ func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 func LogReplication(lastLogEntryIndex int) error {
 	// filePath := config[me.serverIndex]["logfile"]
 	type LR struct {
-		mux             sync.Mutex
-		majorityCounter int
-		wg              sync.WaitGroup
+		mux                sync.Mutex
+		majorityCounter    int
+		majorityCounterNew int
+		wg                 sync.WaitGroup
 	}
 	var lr LR
-	lr.majorityCounter = int(math.Ceil(float64(len(activeServers)+1)/2)) - 1 // leader counting it's own vote
-	lr.wg.Add(1)
-	var err error
-	for _, index := range activeServers {
+	lr.majorityCounter = int(math.Ceil(float64(len(me.activeServers)+1)/2)) - 1 // leader counting it's own vote
+	lr.majorityCounterNew = int(math.Ceil(float64(len(me.newServers)+1) / 2))
+	if isElementPresentInArray(me.newServers, me.serverIndex) {
+		lr.majorityCounterNew = lr.majorityCounterNew - 1
+	}
+
+	allServers := serversUnion(me.activeServers, me.newServers)
+
+	var consensusErr error
+	for _, index := range allServers {
 		if index != me.serverIndex {
 			go func(server int) {
 				for {
@@ -673,22 +771,29 @@ func LogReplication(lastLogEntryIndex int) error {
 						client := rpc.NewClient(conn)
 						defer client.Close()
 						defer conn.Close()
-						err = client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
+						err := client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
 							fmt.Println("received response for =====", lastLogEntryIndex, appendEntriesReturn)
 							if appendEntriesReturn.Success {
 								me.mux.Lock()
 								me.matchIndex[server] = prevlogIndex + len(logEntries)
 								me.nextIndex[server] = me.matchIndex[server] + 1
-								me.mux.Unlock()
 
-								lr.mux.Lock()
-								lr.majorityCounter--
-								if lr.majorityCounter == 0 {
-									lr.wg.Done()
+								if me.nextIndex[server] >= lastLogEntryIndex {
+									lr.mux.Lock()
+									if isElementPresentInArray(me.activeServers, server) {
+										lr.majorityCounter--
+									}
+									if isElementPresentInArray(me.newServers, server) {
+										lr.majorityCounterNew--
+									}
+									if lr.majorityCounter == 0 && lr.majorityCounterNew == 0 {
+										lr.wg.Done()
+									}
+									lr.mux.Unlock()
+									break
 								}
-								lr.mux.Unlock()
-								break
+								me.mux.Unlock()
 							} else {
 								if appendEntriesReturn.CurrentTerm > leaderCurrentTerm {
 									me.mux.Lock()
@@ -698,11 +803,12 @@ func LogReplication(lastLogEntryIndex int) error {
 									metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
 									me.mux.Unlock()
 
-									err = errors.New("Leader has changed state to follower, so consensus cannot be reached")
+									consensusErr = errors.New("Leader has changed state to follower, so consensus cannot be reached")
 									lr.mux.Lock()
-									if lr.majorityCounter > 0 {
+									if lr.majorityCounter > 0 || lr.majorityCounterNew > 0 {
 										lr.wg.Done()
 										lr.majorityCounter = -1
+										lr.majorityCounterNew = -1
 									}
 									lr.mux.Unlock()
 
@@ -726,8 +832,10 @@ func LogReplication(lastLogEntryIndex int) error {
 		}
 	}
 	timeout := 500 * time.Millisecond
-	waitTimeout(&lr.wg, timeout)
-	return err
+	if waitTimeout(&lr.wg, timeout) {
+		return errors.New("Log Replication Timed out")
+	}
+	return consensusErr
 }
 
 //Init ... takes in config and index of the current server in config
@@ -879,10 +987,10 @@ func readActiveServers() {
 	activeServersArr := strings.Split(fileContentLines[0], ",")
 	for _, server := range activeServersArr {
 		serverIndex, _ := strconv.Atoi(server)
-		activeServers = append(activeServers, serverIndex)
+		me.activeServers = append(me.activeServers, serverIndex)
 	}
 
-	fmt.Println(activeServers)
+	fmt.Println(me.activeServers)
 }
 
 func main() {

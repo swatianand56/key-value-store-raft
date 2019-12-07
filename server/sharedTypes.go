@@ -29,6 +29,11 @@ type RaftServer struct {
 	matchIndex map[int]int // not sure where this is used -- but keeping it for now (initialize to 0)
 
 	mux sync.Mutex
+
+	changeMembership bool
+
+	activeServers []int
+	newServers    []int
 }
 
 //LogEntry ... This entry goes in the log file
