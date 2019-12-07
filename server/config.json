@@ -27,6 +27,55 @@
             "filename": "./3.txt",
             "logfile":  "./log-3.txt",
             "metadata": "./metadata-3.txt"
+        },
+        {
+            "port":     "8005",
+            "host":     "localhost",
+            "filename": "./4.txt",
+            "logfile":  "./log-4.txt",
+            "metadata": "./metadata-4.txt"
+        },
+        {
+            "port":     "8006",
+            "host":     "localhost",
+            "filename": "./5.txt",
+            "logfile":  "./log-5.txt",
+            "metadata": "./metadata-5.txt"
+        },
+        {
+            "port":     "8007",
+            "host":     "localhost",
+            "filename": "./7.txt",
+            "logfile":  "./log-7.txt",
+            "metadata": "./metadata-7.txt"
+        },
+        {
+            "port":     "8008",
+            "host":     "localhost",
+            "filename": "./8.txt",
+            "logfile":  "./log-8.txt",
+            "metadata": "./metadata-8.txt"
+        },
+        {
+            "port":     "8009",
+            "host":     "localhost",
+            "filename": "./9.txt",
+            "logfile":  "./log-9.txt",
+            "metadata": "./metadata-9.txt"
+        },
+        {
+            "port":     "8010",
+            "host":     "localhost",
+            "filename": "./10.txt",
+            "logfile":  "./log-10.txt",
+            "metadata": "./metadata-10.txt"
+        },
+        {
+            "port":     "8011",
+            "host":     "localhost",
+            "filename": "./11.txt",
+            "logfile":  "./log-11.txt",
+            "metadata": "./metadata-11.txt"
         }
     ]
 }
