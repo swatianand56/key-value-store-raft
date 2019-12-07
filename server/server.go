@@ -824,8 +824,10 @@ func LogReplication(lastLogEntryIndex int) error {
 								me.mux.Lock()
 								me.matchIndex[server] = prevlogIndex + len(logEntries)
 								me.nextIndex[server] = me.matchIndex[server] + 1
+								thisServerNextIndex := me.nextIndex[server]
+								me.mux.Unlock()
 
-								if me.nextIndex[server] >= lastLogEntryIndex {
+								if thisServerNextIndex >= lastLogEntryIndex {
 									lr.mux.Lock()
 									if isElementPresentInArray(me.activeServers, server) {
 										lr.majorityCounter--
@@ -839,7 +841,6 @@ func LogReplication(lastLogEntryIndex int) error {
 									lr.mux.Unlock()
 									break
 								}
-								me.mux.Unlock()
 							} else {
 								if appendEntriesReturn.CurrentTerm > leaderCurrentTerm {
 									me.mux.Lock()
