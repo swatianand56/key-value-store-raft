@@ -227,6 +227,10 @@ func (me *RaftServer) ChangeMembership(newConfig []int, reply *int) error {
 
 	err = ioutil.WriteFile(activeServerFilename, []byte(newConfigStr), 0)
 
+	if !isElementPresentInArray(me.activeServers, me.serverIndex) {
+		me.leaderIndex = -1
+	}
+
 	if err != nil {
 		fmt.Println("could not write final config change to the server active servers file")
 	}
