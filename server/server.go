@@ -376,7 +376,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
 func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
-
+	fmt.Println("received request vote")
 	me.mux.Lock()
 	mycurrentTerm := me.currentTerm
 	myserverVotedFor := me.serverVotedFor
@@ -481,9 +481,10 @@ func sendHeartbeat(i int) {
 // when calling this method use the go func format? -- this would launch it on a separate thread -- not sure how this would be different from the normal operation though (can experiment)
 func sendLeaderHeartbeats() error {
 	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
+	allServers := serversUnion(me.newServers, me.activeServers)
 	for {
 		if me.serverIndex == me.leaderIndex {
-			for _, i := range me.activeServers {
+			for _, i := range allServers {
 				if i != me.serverIndex {
 					go sendHeartbeat(i)
 				}
@@ -495,6 +496,15 @@ func sendLeaderHeartbeats() error {
 	}
 }
 
+func strToIntArr(strarr []string) []int {
+	var ret []int
+	for _, i := range strarr {
+		index, _ := strconv.Atoi(i)
+		ret = append(ret, index)
+	}
+	return ret
+}
+
 func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	for {
@@ -503,30 +513,40 @@ func applyCommittedEntries() {
 			me.lastAppliedIndex++
 			logs := me.logs
 			currentLog := logs[me.lastAppliedIndex]
+			key := currentLog.Key
 			value := currentLog.Value
 
-			// Add/update key value pair to the server if it is only a put request
-			if value != "" {
-				keyFound := false
-				for i := 0; i < len(me.data); i++ {
-					data := me.data[i]
-					if data.Key == currentLog.Key {
-						data.Value = currentLog.Value
-						me.data[i] = data
-						keyFound = true
-						break
+			if key == "config-old-new" {
+				me.newServers = strToIntArr(strings.Split(value, ","))
+				me.mux.Unlock()
+			} else if key == "config-new" {
+				me.activeServers = me.newServers
+				me.newServers = make([]int, 0)
+				me.mux.Unlock()
+			} else {
+				// Add/update key value pair to the server if it is only a put request
+				if value != "" {
+					keyFound := false
+					for i := 0; i < len(me.data); i++ {
+						data := me.data[i]
+						if data.Key == currentLog.Key {
+							data.Value = currentLog.Value
+							me.data[i] = data
+							keyFound = true
+							break
+						}
+					}
+					if !keyFound {
+						me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
 					}
 				}
-				if !keyFound {
-					me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
-				}
-			}
-			data := me.data
-			me.mux.Unlock()
+				data := me.data
+				me.mux.Unlock()
 
-			err := writeDataInFile(data)
-			if err != nil {
-				fmt.Println("error in writing data at file", err)
+				err := writeDataInFile(data)
+				if err != nil {
+					fmt.Println("error in writing data at file", err)
+				}
 			}
 		} else {
 			me.mux.Unlock()
@@ -577,16 +597,28 @@ func LeaderElection() error {
 		var requestVoteResponses = make(map[int]*RequestVoteResponse)
 
 		type LE struct {
-			mux             sync.Mutex
-			majorityCounter int
-			wg              sync.WaitGroup
+			mux                sync.Mutex
+			majorityCounter    int
+			majorityCounterNew int
+			wg                 sync.WaitGroup
 		}
 		var le LE
 		le.majorityCounter = int(math.Ceil(float64(len(me.activeServers)+1)/2)) - 1
+		if len(me.newServers) == 0 {
+			le.majorityCounterNew = 0
+		} else {
+			le.majorityCounterNew = int(math.Ceil(float64(len(me.newServers)+1) / 2))
+			if isElementPresentInArray(me.newServers, me.serverIndex) {
+				le.majorityCounterNew = le.majorityCounterNew - 1
+			}
+		}
+
 		le.wg.Add(1)
 
+		allServers := serversUnion(me.activeServers, me.newServers)
+
 		// request a vote from every client
-		for _, index := range me.activeServers {
+		for _, index := range allServers {
 			requestVoteResponses[index] = new(RequestVoteResponse)
 
 			if index != myserverIndex {
@@ -613,10 +645,17 @@ func LeaderElection() error {
 						if err != nil {
 							fmt.Println("Error in request vote", err)
 						}
+						fmt.Println("Vote granted by server ", index, requestVoteResponses[index])
 						if requestVoteResponses[index].VoteGranted {
 							le.mux.Lock()
-							le.majorityCounter--
-							if le.majorityCounter == 0 {
+							if isElementPresentInArray(me.activeServers, index) {
+								le.majorityCounter--
+							}
+							if isElementPresentInArray(me.newServers, index) {
+								le.majorityCounterNew--
+							}
+							fmt.Println("majority counts ", le.majorityCounter, le.majorityCounterNew)
+							if le.majorityCounter == 0 && le.majorityCounterNew == 0 {
 								le.wg.Done()
 							}
 							le.mux.Unlock()
@@ -632,8 +671,9 @@ func LeaderElection() error {
 								}
 								me.mux.Unlock()
 								le.mux.Lock()
-								if le.majorityCounter > 0 {
+								if le.majorityCounter > 0 || le.majorityCounterNew > 0 {
 									le.majorityCounter = -1
+									le.majorityCounterNew = -1
 									le.wg.Done()
 								}
 								le.mux.Unlock()
@@ -655,8 +695,9 @@ func LeaderElection() error {
 			if currentElectionTerm == me.currentTerm {
 				me.mux.Lock()
 				me.leaderIndex = me.serverIndex
+				fmt.Println("Leader elected")
 				length := len(me.logs)
-				for _, i := range me.activeServers {
+				for _, i := range allServers {
 					me.nextIndex[i] = length
 					me.matchIndex[i] = 0
 				}
@@ -718,11 +759,16 @@ func LogReplication(lastLogEntryIndex int) error {
 	}
 	var lr LR
 	lr.majorityCounter = int(math.Ceil(float64(len(me.activeServers)+1)/2)) - 1 // leader counting it's own vote
-	lr.majorityCounterNew = int(math.Ceil(float64(len(me.newServers)+1) / 2))
-	if isElementPresentInArray(me.newServers, me.serverIndex) {
-		lr.majorityCounterNew = lr.majorityCounterNew - 1
+	if len(me.newServers) == 0 {
+		lr.majorityCounterNew = 0
+	} else {
+		lr.majorityCounterNew = int(math.Ceil(float64(len(me.newServers)+1) / 2))
+		if isElementPresentInArray(me.newServers, me.serverIndex) {
+			lr.majorityCounterNew = lr.majorityCounterNew - 1
+		}
 	}
 
+	lr.wg.Add(1)
 	allServers := serversUnion(me.activeServers, me.newServers)
 
 	var consensusErr error
