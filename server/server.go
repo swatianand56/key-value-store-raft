@@ -80,7 +80,9 @@ func (me *RaftServer) GetKey(key string, value *string) error {
 		// TODO: how to ensure order in which entries are committed -- can index 12 commit before 11 is committed
 		// What's the possibility of using No-op here?
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
-		me.lastAppliedIndex = me.commitIndex
+		for i := me.lastAppliedIndex; i < me.commitIndex; i++ {
+			applyEntries()
+		}
 		// fetch the value of the key
 		data := me.data
 		me.mux.Unlock()
@@ -130,27 +132,14 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 		}
 
 		// Written to log, now do the operation on the file (following write-ahead logging semantics)
-		keyFound := false
 		me.mux.Lock()
-		for i := 0; i < len(me.data); i++ {
-			data := me.data[i]
-			if keyValue.Key == data.Key {
-				*oldValue = data.Value
-				me.data[i] = data
-				keyFound = true
-				break
-			}
-		}
-		if !keyFound {
-			me.data = append(me.data, keyValue)
-		}
 		// Once it has been applied to the server file, we can set the commit index to the lastLogEntryIndex (should be kept here in the local variable to avoid conflicts with the parallel requests that might update it?)
 		me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
-		me.lastAppliedIndex = me.commitIndex
-		data := me.data
+		for i := me.lastAppliedIndex; i < me.commitIndex; i++ {
+			applyEntries()
+		}
 		me.mux.Unlock()
 
-		err = writeDataInFile(data)
 		if err != nil {
 			return err
 		}
@@ -161,7 +150,7 @@ func (me *RaftServer) PutKey(keyValue KeyValuePair, oldValue *string) error {
 	return errors.New("LeaderIndex:" + strconv.Itoa(me.leaderIndex))
 }
 
-func (me *RaftServer) ChangeMembership(newConfig []int) error {
+func (me *RaftServer) ChangeMembership(newConfig []int, reply *int) error {
 	// create cold, new config (log replicate)
 	// new servers ()
 	me.mux.Lock()
@@ -198,7 +187,10 @@ func (me *RaftServer) ChangeMembership(newConfig []int) error {
 
 	me.mux.Lock()
 	me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
-	me.lastAppliedIndex = me.commitIndex
+	for i := me.lastAppliedIndex; i < me.commitIndex; i++ {
+		applyEntries()
+	}
+
 	me.lastLogEntryIndex = me.lastLogEntryIndex + 1
 	logEntryIndex = me.lastLogEntryIndex
 	le = LogEntry{Key: "config-new", Value: newConfigStr, TermID: strconv.Itoa(me.currentTerm), IndexID: strconv.Itoa(logEntryIndex)}
@@ -223,10 +215,13 @@ func (me *RaftServer) ChangeMembership(newConfig []int) error {
 	}
 
 	me.mux.Lock()
-	me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
-	me.lastAppliedIndex = me.commitIndex
+	// ToDo - Not sure whether to wait for consensus or not?
 	me.activeServers = me.newServers
 	me.newServers = make([]int, 0)
+	me.commitIndex = int(math.Max(float64(me.commitIndex), float64(logEntryIndex)))
+	for i := me.lastAppliedIndex; i < me.commitIndex; i++ {
+		applyEntries()
+	}
 	//TODO: step down the leader if not in new config
 	me.mux.Unlock()
 
@@ -366,6 +361,18 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		reply.CurrentTerm = args.LeaderTerm
 		return err
 	}
+
+	for i := 0; i < len(args.Entries); i++ {
+		key := args.Entries[i].Key
+		value := args.Entries[i].Value
+		if key == "config-old-new" {
+			me.newServers = strToIntArr(strings.Split(value, ","))
+		} else if key == "config-new" {
+			me.activeServers = me.newServers
+			me.newServers = make([]int, 0)
+		}
+	}
+
 	reply.Success = true
 	reply.CurrentTerm = args.LeaderTerm
 
@@ -377,6 +384,13 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
 func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
 	fmt.Println("received request vote")
+	me.mux.Lock()
+	allServers := serversUnion(me.newServers, me.activeServers)
+	me.mux.Unlock()
+	if me.lastMessageTime+int64(me.electionMinTime) > time.Now().UnixNano() || !isElementPresentInArray(allServers, args.CandidateIndex) {
+		reply.VoteGranted = false
+		return nil
+	}
 	me.mux.Lock()
 	mycurrentTerm := me.currentTerm
 	myserverVotedFor := me.serverVotedFor
@@ -481,9 +495,11 @@ func sendHeartbeat(i int) {
 // when calling this method use the go func format? -- this would launch it on a separate thread -- not sure how this would be different from the normal operation though (can experiment)
 func sendLeaderHeartbeats() error {
 	// if current server is the leader, then send AppendEntries heartbeat RPC at idle times to prevent leader election and just after election
-	allServers := serversUnion(me.newServers, me.activeServers)
 	for {
 		if me.serverIndex == me.leaderIndex {
+			me.mux.Lock()
+			allServers := serversUnion(me.newServers, me.activeServers)
+			me.mux.Unlock()
 			for _, i := range allServers {
 				if i != me.serverIndex {
 					go sendHeartbeat(i)
@@ -505,51 +521,49 @@ func strToIntArr(strarr []string) []int {
 	return ret
 }
 
+func applyEntries() {
+	if me.lastAppliedIndex < me.commitIndex {
+		me.lastAppliedIndex++
+		logs := me.logs
+		currentLog := logs[me.lastAppliedIndex]
+		key := currentLog.Key
+		value := currentLog.Value
+
+		if !(key == "config-old-new" || key == "config-new") {
+			// Add/update key value pair to the server if it is only a put request
+			if value != "" {
+				keyFound := false
+				for i := 0; i < len(me.data); i++ {
+					data := me.data[i]
+					if data.Key == currentLog.Key {
+						data.Value = currentLog.Value
+						me.data[i] = data
+						keyFound = true
+						break
+					}
+				}
+				if !keyFound {
+					me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
+				}
+			}
+			data := me.data
+
+			err := writeDataInFile(data)
+			if err != nil {
+				fmt.Println("error in writing data at file", err)
+			}
+		}
+	}
+}
+
 func applyCommittedEntries() {
 	// at an interval of t ms, if (commitIndex > lastAppliedIndex), then apply entries one by one to the server file (state machine)
 	for {
-		me.mux.Lock()
 		if me.lastAppliedIndex < me.commitIndex {
-			me.lastAppliedIndex++
-			logs := me.logs
-			currentLog := logs[me.lastAppliedIndex]
-			key := currentLog.Key
-			value := currentLog.Value
-
-			if key == "config-old-new" {
-				me.newServers = strToIntArr(strings.Split(value, ","))
-				me.mux.Unlock()
-			} else if key == "config-new" {
-				me.activeServers = me.newServers
-				me.newServers = make([]int, 0)
-				me.mux.Unlock()
-			} else {
-				// Add/update key value pair to the server if it is only a put request
-				if value != "" {
-					keyFound := false
-					for i := 0; i < len(me.data); i++ {
-						data := me.data[i]
-						if data.Key == currentLog.Key {
-							data.Value = currentLog.Value
-							me.data[i] = data
-							keyFound = true
-							break
-						}
-					}
-					if !keyFound {
-						me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
-					}
-				}
-				data := me.data
-				me.mux.Unlock()
-
-				err := writeDataInFile(data)
-				if err != nil {
-					fmt.Println("error in writing data at file", err)
-				}
-			}
-		} else {
+			me.mux.Lock()
+			applyEntries()
 			me.mux.Unlock()
+		} else {
 			time.Sleep(100 * time.Millisecond) // check after every 100ms
 		}
 	}
@@ -563,12 +577,20 @@ func LeaderElection() error {
 	// probably need to extend the sleep/waiting time everytime me.lastMessageTime is received (variable value can change in AppendEntries)
 
 	for {
+
 		var lastNap = rand.Intn(me.electionMaxTime-me.electionMinTime) + me.electionMinTime
 		var asleep = time.Now().UnixNano()
 		time.Sleep(time.Duration(lastNap) * time.Nanosecond)
 
+		me.mux.Lock()
+		activeServers := me.activeServers
+		newServers := me.newServers
+		me.mux.Unlock()
+
+		allServers := serversUnion(activeServers, newServers)
+
 		// no election necessary if the last message was received after we went to sleep.
-		if me.lastMessageTime > asleep || me.serverIndex == me.leaderIndex {
+		if me.lastMessageTime > asleep || me.serverIndex == me.leaderIndex || !isElementPresentInArray(allServers, me.serverIndex) {
 			continue
 		}
 
@@ -603,19 +625,17 @@ func LeaderElection() error {
 			wg                 sync.WaitGroup
 		}
 		var le LE
-		le.majorityCounter = int(math.Ceil(float64(len(me.activeServers)+1)/2)) - 1
-		if len(me.newServers) == 0 {
+		le.wg.Add(2)
+		le.majorityCounter = int(math.Ceil(float64(len(activeServers)+1)/2)) - 1
+		if len(newServers) == 0 {
 			le.majorityCounterNew = 0
+			le.wg.Done()
 		} else {
-			le.majorityCounterNew = int(math.Ceil(float64(len(me.newServers)+1) / 2))
-			if isElementPresentInArray(me.newServers, me.serverIndex) {
+			le.majorityCounterNew = int(math.Ceil(float64(len(newServers)+1) / 2))
+			if isElementPresentInArray(newServers, me.serverIndex) {
 				le.majorityCounterNew = le.majorityCounterNew - 1
 			}
 		}
-
-		le.wg.Add(1)
-
-		allServers := serversUnion(me.activeServers, me.newServers)
 
 		// request a vote from every client
 		for _, index := range allServers {
@@ -648,16 +668,19 @@ func LeaderElection() error {
 						fmt.Println("Vote granted by server ", index, requestVoteResponses[index])
 						if requestVoteResponses[index].VoteGranted {
 							le.mux.Lock()
-							if isElementPresentInArray(me.activeServers, index) {
+							if isElementPresentInArray(activeServers, index) {
 								le.majorityCounter--
+								if le.majorityCounter == 0 {
+									le.wg.Done()
+								}
 							}
-							if isElementPresentInArray(me.newServers, index) {
+							if isElementPresentInArray(newServers, index) {
 								le.majorityCounterNew--
+								if le.majorityCounterNew == 0 {
+									le.wg.Done()
+								}
 							}
 							fmt.Println("majority counts ", le.majorityCounter, le.majorityCounterNew)
-							if le.majorityCounter == 0 && le.majorityCounterNew == 0 {
-								le.wg.Done()
-							}
 							le.mux.Unlock()
 						} else {
 							if requestVoteResponses[index].CurrentTerm > currentElectionTerm {
@@ -671,8 +694,11 @@ func LeaderElection() error {
 								}
 								me.mux.Unlock()
 								le.mux.Lock()
-								if le.majorityCounter > 0 || le.majorityCounterNew > 0 {
+								if le.majorityCounter > 0 {
 									le.majorityCounter = -1
+									le.wg.Done()
+								}
+								if le.majorityCounter > 0 || le.majorityCounterNew > 0 {
 									le.majorityCounterNew = -1
 									le.wg.Done()
 								}
@@ -757,19 +783,25 @@ func LogReplication(lastLogEntryIndex int) error {
 		majorityCounterNew int
 		wg                 sync.WaitGroup
 	}
+	me.mux.Lock()
+	activeServers := me.activeServers
+	newServers := me.newServers
+	me.mux.Unlock()
+
+	allServers := serversUnion(activeServers, newServers)
+
 	var lr LR
-	lr.majorityCounter = int(math.Ceil(float64(len(me.activeServers)+1)/2)) - 1 // leader counting it's own vote
+	lr.wg.Add(2)
+	lr.majorityCounter = int(math.Ceil(float64(len(activeServers)+1)/2)) - 1 // leader counting it's own vote
 	if len(me.newServers) == 0 {
 		lr.majorityCounterNew = 0
+		lr.wg.Done()
 	} else {
-		lr.majorityCounterNew = int(math.Ceil(float64(len(me.newServers)+1) / 2))
-		if isElementPresentInArray(me.newServers, me.serverIndex) {
+		lr.majorityCounterNew = int(math.Ceil(float64(len(newServers)+1) / 2))
+		if isElementPresentInArray(newServers, me.serverIndex) {
 			lr.majorityCounterNew = lr.majorityCounterNew - 1
 		}
 	}
-
-	lr.wg.Add(1)
-	allServers := serversUnion(me.activeServers, me.newServers)
 
 	var consensusErr error
 	for _, index := range allServers {
@@ -783,8 +815,6 @@ func LogReplication(lastLogEntryIndex int) error {
 					for j := me.nextIndex[server]; j < int(math.Min(float64(me.nextIndex[server]+1000), float64(len(me.logs)))); j++ {
 						logEntries = append(logEntries, me.logs[j])
 					}
-
-					fmt.Println("next index ====> ", me.nextIndex[server], len(logEntries), len(me.logs))
 
 					prevlogIndex := me.nextIndex[server] - 1
 					prevlogTerm := "0"
@@ -819,7 +849,6 @@ func LogReplication(lastLogEntryIndex int) error {
 						defer conn.Close()
 						err := client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
-							fmt.Println("received response for =====", lastLogEntryIndex, appendEntriesReturn)
 							if appendEntriesReturn.Success {
 								me.mux.Lock()
 								me.matchIndex[server] = prevlogIndex + len(logEntries)
@@ -829,14 +858,17 @@ func LogReplication(lastLogEntryIndex int) error {
 
 								if thisServerNextIndex >= lastLogEntryIndex {
 									lr.mux.Lock()
-									if isElementPresentInArray(me.activeServers, server) {
+									if isElementPresentInArray(activeServers, server) {
 										lr.majorityCounter--
+										if lr.majorityCounter == 0 {
+											lr.wg.Done()
+										}
 									}
-									if isElementPresentInArray(me.newServers, server) {
+									if isElementPresentInArray(newServers, server) {
 										lr.majorityCounterNew--
-									}
-									if lr.majorityCounter == 0 && lr.majorityCounterNew == 0 {
-										lr.wg.Done()
+										if lr.majorityCounterNew == 0 {
+											lr.wg.Done()
+										}
 									}
 									lr.mux.Unlock()
 									break
@@ -852,9 +884,12 @@ func LogReplication(lastLogEntryIndex int) error {
 
 									consensusErr = errors.New("Leader has changed state to follower, so consensus cannot be reached")
 									lr.mux.Lock()
-									if lr.majorityCounter > 0 || lr.majorityCounterNew > 0 {
+									if lr.majorityCounter > 0 {
 										lr.wg.Done()
 										lr.majorityCounter = -1
+									}
+									if lr.majorityCounterNew > 0 {
+										lr.wg.Done()
 										lr.majorityCounterNew = -1
 									}
 									lr.mux.Unlock()

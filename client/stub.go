@@ -30,6 +30,49 @@ func kv739_shutdown() int {
 	return 0
 }
 
+func kv739_changeMembership(newConfig []int) int {
+	return executeChangeMembership(newConfig, serverList[leaderIndex])
+}
+
+func executeChangeMembership(newConfig []int, address string) int {
+	if len(address) > 0 {
+		conn, err = net.DialTimeout("tcp", address, 250*time.Millisecond)
+	}
+	if err == nil {
+		client = rpc.NewClient(conn)
+		defer client.Close()
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+		var reply int
+		err = client.Call("RaftServer.ChangeMembership", newConfig, &reply)
+		if err == nil {
+			return 0
+		} else if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
+			thisLeader, _ := strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
+			if thisLeader != -1 {
+				leaderIndex = thisLeader
+			}
+			address = serverList[leaderIndex]
+			return executeChangeMembership(newConfig, address)
+		} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+			leaderIndex = (leaderIndex + 1) % len(serverList)
+			getResult := executeChangeMembership(newConfig, serverList[leaderIndex])
+			if getResult != -1 {
+				return getResult
+			}
+		}
+		fmt.Println("Unable to change membership: ", newConfig, " from leader: ", leaderIndex, " err: ", err)
+	} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+		leaderIndex = (leaderIndex + 1) % len(serverList)
+		getResult := executeChangeMembership(newConfig, serverList[leaderIndex])
+		if getResult != -1 {
+			return getResult
+		}
+	}
+	fmt.Println("Error in change membership", err)
+	return -1
+}
+
 func executeGetKey(key string, value *string, address string) int {
 	if len(address) > 0 {
 		conn, err = net.DialTimeout("tcp", address, 250*time.Millisecond)
