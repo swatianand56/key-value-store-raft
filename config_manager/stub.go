@@ -44,13 +44,13 @@ func kv739_changeMembership(newConfig []int) int {
 
 func executeChangeMembership(newConfig []int, address string) int {
 	if len(address) > 0 {
-		conn, err = net.DialTimeout("tcp", address, 250*time.Millisecond)
+		conn, err = net.DialTimeout("tcp", address, 1000*time.Millisecond)
 	}
 	if err == nil {
 		client = rpc.NewClient(conn)
 		defer client.Close()
 		defer conn.Close()
-		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+		conn.SetDeadline(time.Now().Add(1000 * time.Millisecond))
 		var reply int
 		err = client.Call("RaftServer.ChangeMembership", newConfig, &reply)
 		if err == nil {
