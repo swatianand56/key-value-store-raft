@@ -8,9 +8,17 @@ import (
 
 func ptc2b() {
 	serverList := []string{
-		"localhost:8001",
-		"localhost:8002",
-		"localhost:8003",
+		"10.10.1.1:8001",
+		"10.10.1.2:8002",
+		"10.10.1.3:8003",
+		"10.10.1.1:8004",
+		"10.10.1.2:8005",
+		"10.10.1.3:8006",
+		"10.10.1.1:8007",
+		"10.10.1.2:8008",
+		"10.10.1.3:8009",
+		"10.10.1.1:8010",
+		"10.10.1.2:8011",
 	}
 	fmt.Println("Calling init -- ", kv739_init(serverList, 3))
 	// var start_time = time.Now()
@@ -32,7 +40,7 @@ func ptc2b() {
 
 	put_end := time.Now()
 
-	for i := 333; i < 666; i++ {
+	for i := 10000; i < 20000; i++ {
 		var key = strconv.Itoa(i)
 		var x = kv739_get(key, &oldValue)
 		if x == -1 {

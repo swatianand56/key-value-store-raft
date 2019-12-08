@@ -14,8 +14,8 @@ var err error
 var client *rpc.Client
 var leaderIndex int
 var reply string
-var serverList []string
 var conn net.Conn
+var serverList []string
 
 //KeyValuePair ... interface type
 type KeyValuePair struct {
@@ -25,35 +25,57 @@ type KeyValuePair struct {
 //export kv739_init
 func kv739_init(serverListArg []string, length int) int {
 	//TODO: can you work without length argument?
-	for index := range serverListArg {
-		serverList = serverListArg
-		// address := serverList[index]
-		leaderIndex = index
-		// conn, err := net.DialTimeout("tcp", address, 250*time.Millisecond)
-		// if err != nil {
-		// 	if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
-		// 		fmt.Println("Connection error: ", err)
-		// 		continue
-		// 	} else {
-		// 		return -1
-		// 	}
-		// }
-		// client := rpc.NewClient(conn)
-		// defer client.Close()
-		// defer conn.Close()
-		return 0
-	}
-	return -1
+	serverList = serverListArg
+	leaderIndex = 0
+	return 0
 }
 
 //export kv739_shutdown
 func kv739_shutdown() int {
-	// err := client.Close()
-	// if err != nil {
-	// 	fmt.Println("Unable to shutdown client connection: ", err)
-	// 	return -1
-	// }
 	return 0
+}
+
+func kv739_changeMembership(newConfig []int) int {
+	return executeChangeMembership(newConfig, serverList[leaderIndex])
+}
+
+func executeChangeMembership(newConfig []int, address string) int {
+	if len(address) > 0 {
+		conn, err = net.DialTimeout("tcp", address, 250*time.Millisecond)
+	}
+	if err == nil {
+		client = rpc.NewClient(conn)
+		defer client.Close()
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+		var reply int
+		err = client.Call("RaftServer.ChangeMembership", newConfig, &reply)
+		if err == nil {
+			return 0
+		} else if match, _ := regexp.MatchString(".*LeaderIndex.*", err.Error()); match {
+			thisLeader, _ := strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
+			if thisLeader != -1 {
+				leaderIndex = thisLeader
+			}
+			address = serverList[leaderIndex]
+			return executeChangeMembership(newConfig, address)
+		} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+			leaderIndex = (leaderIndex + 1) % len(serverList)
+			getResult := executeChangeMembership(newConfig, serverList[leaderIndex])
+			if getResult != -1 {
+				return getResult
+			}
+		}
+		fmt.Println("Unable to change membership: ", newConfig, " from leader: ", leaderIndex, " err: ", err)
+	} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+		leaderIndex = (leaderIndex + 1) % len(serverList)
+		getResult := executeChangeMembership(newConfig, serverList[leaderIndex])
+		if getResult != -1 {
+			return getResult
+		}
+	}
+	fmt.Println("Error in change membership", err)
+	return -1
 }
 
 func executeGetKey(key string, value *string, address string) int {
@@ -64,6 +86,7 @@ func executeGetKey(key string, value *string, address string) int {
 		client = rpc.NewClient(conn)
 		defer client.Close()
 		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
 		err = client.Call("RaftServer.GetKey", key, value)
 		if err == nil {
 			if len(*value) > 0 {
@@ -92,6 +115,7 @@ func executeGetKey(key string, value *string, address string) int {
 			return getResult
 		}
 	}
+	fmt.Println("Error in get key", err)
 	return -1
 }
 
@@ -117,6 +141,7 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 		client = rpc.NewClient(conn)
 		defer client.Close()
 		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
 		err = client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
 		if err == nil {
 			if len(*oldValue) > 0 {
@@ -131,6 +156,7 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 			address = serverList[leaderIndex]
 			return executePutKey(key, value, oldValue, address)
 		} else if match, _ := regexp.MatchString(".*connection.*", err.Error()); match {
+			// TODO doesn't the server reply with the new leader?  Shouldn't we read the response from the reply instead of iterating through the server list?
 			leaderIndex = (leaderIndex + 1) % len(serverList)
 			putResult := executePutKey(key, value, oldValue, serverList[leaderIndex])
 			if putResult != -1 {
