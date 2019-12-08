@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"os/exec"
@@ -144,17 +145,14 @@ func main() {
 
 		if len(serversToStart) > 0 {
 			for _, server := range serversToStart {
-				cmd := exec.Command("ssh", strings.Split(serverList[server], ":")[0])
+				cmd := exec.Command("./key-value-store-raft/server/start-server.sh", strconv.Itoa(server), strings.Split(serverList[server], ":")[0])
+				var out bytes.Buffer
+				var stderr bytes.Buffer
+				cmd.Stdout = &out
+				cmd.Stderr = &stderr
 				err := cmd.Run()
 				if err != nil {
-					fmt.Println("could not ssh into another machine")
-					continue
-				}
-
-				cmd = exec.Command("./key-value-store-raft/server/start-server.sh", strconv.Itoa(server))
-				err = cmd.Run()
-				if err != nil {
-					fmt.Println("Error starting the server", err)
+					fmt.Println("Error starting the server", err, stderr, out)
 				}
 				fmt.Println("server started", server)
 			}
@@ -172,16 +170,14 @@ func main() {
 			fmt.Println("Change membership is successful to the given configuration", activeServers)
 			if len(serversToKill) > 0 {
 				for _, server := range serversToKill {
-					cmd := exec.Command("ssh", strings.Split(serverList[server], ":")[0])
+					cmd := exec.Command("./key-value-store-raft/server/kill-server.sh", strconv.Itoa(server), strings.Split(serverList[server], ":")[0])
+					var out bytes.Buffer
+					var stderr bytes.Buffer
+					cmd.Stdout = &out
+					cmd.Stderr = &stderr
 					err := cmd.Run()
 					if err != nil {
-						fmt.Println("could not ssh into another machine")
-						continue
-					}
-					cmd = exec.Command("./key-value-store-raft/server/kill-server.sh", strconv.Itoa(server))
-					err = cmd.Run()
-					if err != nil {
-						fmt.Println("Error starting the server", err)
+						fmt.Println("Error starting the server", err, stderr, out)
 					}
 					fmt.Println("server started", server)
 				}
