@@ -76,12 +76,19 @@ func main() {
 			serverStatus = kv739_init([]string{serverList[server]}, 1)
 			if serverStatus == -1 { // error connecting
 				unreachableServers = append(unreachableServers, server)
-				activeServers[index] = activeServers[len(activeServers)-1]
-				activeServers = activeServers[:len(activeServers)-1]
+				activeServers[index] = -1
 				numFailures++
 				fmt.Println("failure encountered new active servers are ", activeServers, unreachableServers)
 			}
 		}
+
+		for index, server := range activeServers {
+			if server == -1 {
+				activeServers = activeServers[:index]
+				break
+			}
+		}
+
 		if numFailures == 0 {
 			if numFailureCycles == 0 {
 				failureHandleCapacity = int(math.Max(float64(failureHandleCapacity-1), float64(1)))
