@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ func main() {
 		fmt.Println("active servers are ---- ", activeServers, failureHandleCapacity, unreachableServers)
 
 		serversToStart = []int{}
-		serversToStart = []int{}
+		serversToKill = []int{}
 
 		var serverStatus int
 		numFailures := 0
@@ -82,12 +83,16 @@ func main() {
 			fmt.Println("checking active server ", server)
 			serverStatus = kv739_init([]string{serverList[server]}, 1)
 			if serverStatus == -1 { // error connecting
-				unreachableServers = append(unreachableServers, server)
+				// unreachableServers = append(unreachableServers, server)
 				activeServers[index] = -1
 				numFailures++
 				fmt.Println("failure encountered new active servers are ", activeServers, unreachableServers)
 			}
 		}
+
+		sort.Slice(activeServers, func(i, j int) bool {
+			return activeServers[i] < activeServers[j]
+		})
 
 		for index, server := range activeServers {
 			if server == -1 {
@@ -137,6 +142,8 @@ func main() {
 			activeServers = activeServers[:activeServersReqd]
 		}
 
+		fmt.Println("servers to start are ", serversToStart)
+
 		if len(serversToStart) > 0 {
 			for _, server := range serversToStart {
 				cmd := exec.Command("ssh", strings.Split(serverList[server], ":")[0])
@@ -145,18 +152,13 @@ func main() {
 					fmt.Println("could not ssh into another machine")
 					continue
 				}
-				cmd = exec.Command("cd", "~/key-value-store-raft/server")
+
+				cmd = exec.Command("./key-value-store-raft/server/start-server.sh", strconv.Itoa(server))
 				err = cmd.Run()
 				if err != nil {
-					fmt.Println("could not cd into server directory")
-					continue
+					fmt.Println("Error starting the server", err)
 				}
-				cmd = exec.Command("go", "run", "server.go", "sharedTypes.go", strconv.Itoa(server), "&", ">", strconv.Itoa(server)+"serverlogs.txt")
-				err = cmd.Run()
-				if err != nil {
-					fmt.Println("could not start the server process")
-					continue
-				}
+				fmt.Println("server started", server)
 			}
 		}
 
@@ -178,22 +180,12 @@ func main() {
 						fmt.Println("could not ssh into another machine")
 						continue
 					}
-					cmd = exec.Command("cd", "~/key-value-store-raft/server")
+					cmd = exec.Command("./key-value-store-raft/server/kill-server.sh", strconv.Itoa(server))
 					err = cmd.Run()
 					if err != nil {
-						fmt.Println("could not cd into server directory")
-						continue
+						fmt.Println("Error starting the server", err)
 					}
-					pid, err := exec.Command("cat", strconv.Itoa(server)+"-pid.txt").Output()
-					if err != nil {
-						fmt.Println("could not fetch the PID to kill server process")
-						continue
-					}
-					cmd = exec.Command("kill", string(pid))
-					err = cmd.Run()
-					if err != nil {
-						fmt.Println("could not kill server process")
-					}
+					fmt.Println("server started", server)
 				}
 			}
 		}
