@@ -51,6 +51,8 @@ func executeChangeMembership(newConfig []int, address string) int {
 			thisLeader, _ := strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
 			if thisLeader != -1 {
 				leaderIndex = thisLeader
+			} else {
+				leaderIndex = (leaderIndex + 1) % len(serverList)
 			}
 			address = serverList[leaderIndex]
 			return executeChangeMembership(newConfig, address)
@@ -92,6 +94,8 @@ func executeGetKey(key string, value *string, address string) int {
 			thisLeader, _ := strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
 			if thisLeader != -1 {
 				leaderIndex = thisLeader
+			} else {
+				leaderIndex = (leaderIndex + 1) % len(serverList)
 			}
 			address = serverList[leaderIndex]
 			return executeGetKey(key, value, address)
@@ -140,6 +144,8 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 			thisLeader, _ := strconv.Atoi(strings.Split(err.Error(), "LeaderIndex:")[1])
 			if thisLeader != -1 {
 				leaderIndex = thisLeader
+			} else {
+				leaderIndex = (leaderIndex + 1) % len(serverList)
 			}
 			address = serverList[leaderIndex]
 			return executePutKey(key, value, oldValue, address)

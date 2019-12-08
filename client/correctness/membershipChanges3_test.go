@@ -10,14 +10,19 @@ import (
 	"time"
 )
 
-// Log replication — n servers failed (rest servers should get log replication)
-func TestLogReplication2(t *testing.T) {
-	var path = "./../../server/"
-	var activeServerFilename = "./activeServers.cfg"
+// Leader not part of new config — new leader should eventually get elected
+// newly added servers should have all logs after cnew, but old servers should not have
+// (all logs before that should match on all new and old servers)
+// simultaneous client requests (10k keys put)
+// (also put sleep() between coldnew and new)
 
-	configStr := "0,1,2,3,4"
-	serversToKill := "0,1"
-	restServers := "2,3,4"
+//Task to do before running this test - Run 5 servers mentioned in the serverlist and run three parallel clients
+func TestMembershipChanges3(t *testing.T) {
+	path := "./../../server/"
+	// var activeServerFilename = "./activeServers.cfg"
+
+	// oldConfigStr := "0,1,2"
+	serverToAddInNewConfigStr := "3,4" // and leader
 
 	serverList := []string{
 		"localhost:8001",
@@ -27,26 +32,12 @@ func TestLogReplication2(t *testing.T) {
 		"localhost:8005",
 	}
 
-	err := ioutil.WriteFile(activeServerFilename, []byte(configStr), 0)
-	if err != nil {
-		t.Errorf("Failed to write in server config file %s", err)
-		return
-	}
-	arr := strings.Split(configStr, ",")                  // 2n+1 servers
-	serversToKillArr := strings.Split(serversToKill, ",") // kill 2 servers
-	restServersArr := strings.Split(restServers, ",")     // 3 servers
-
-	majority := int(math.Ceil(float64(len(arr)+1) / 2))
-
-	ServerSetup(0, serverList, arr)
-
-	time.Sleep(time.Duration(5) * time.Second) // time to elect the leader
+	// servers := strings.Split(oldConfigStr, ",") // 2n+1 servers
+	// newServersArr := strings.Split(serverToAddInNewConfigStr, ",")
 
 	var number_of_keys = 50
-
 	kv739_init(serverList, 11)
 	var oldValue string
-
 	var keys_not_found = 0
 	var key_value_mismatch = 0
 	var put_key_unsuccessful = 0
@@ -67,12 +58,33 @@ func TestLogReplication2(t *testing.T) {
 		}
 	}
 
+	currentLeader := strconv.Itoa(leaderIndex)
+	newServerConfig := serverToAddInNewConfigStr
+	if currentLeader == "0" {
+		newServerConfig = "1,2," + serverToAddInNewConfigStr
+	} else if currentLeader == "1" {
+		newServerConfig = "0,2," + serverToAddInNewConfigStr
+	} else {
+		newServerConfig = "0,1," + serverToAddInNewConfigStr
+	}
+
+	newServerConfigArr := strings.Split(newServerConfig, ",")
+
+	var newConfigServers = []int{}
+	for _, i := range newServerConfigArr {
+		j, err := strconv.Atoi(i)
+		if err != nil {
+			panic(err)
+		}
+		newConfigServers = append(newConfigServers, j)
+	}
+
 	time.Sleep(time.Duration(1) * time.Second) // buffer time to sync logs int all the servers
 
-	ServerTeardown(serversToKillArr) // kill n servers
+	fmt.Println("new config servers -----------------------------------------> ", newConfigServers)
+	fmt.Println("membership changes status ----------------------------------> ", kv739_changeMembership(newConfigServers))
 
-	time.Sleep(time.Duration(3) * time.Second) // buffer time to elect new leader
-
+	majority := int(math.Ceil(float64(len(newConfigServers)+1) / 2))
 	for i := 0; i < number_of_keys; i++ {
 		var key = strconv.Itoa(i)
 		x := kv739_put(key, key, &oldValue)
@@ -90,18 +102,18 @@ func TestLogReplication2(t *testing.T) {
 	}
 
 	currentLeaderIndex := strconv.Itoa(leaderIndex)
-
 	time.Sleep(time.Duration(1) * time.Second) // buffer time to sync logs int all the servers
 
+	arr := newServerConfigArr // check the logs of new server config
 	var content = make(map[string][]string)
 	leaderLogSize := 0
 	for i := range arr {
 		index := arr[i]
-		filePath := "./log-" + index + ".txt"
+		filePath := path + "log-" + index + ".txt"
 		fileContent, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			t.Errorf("error in reading log file")
-			ServerTeardown(restServersArr)
+			ServerTeardown(arr)
 			return
 		}
 		lines := strings.Split(string(fileContent), "\n")
@@ -116,15 +128,10 @@ func TestLogReplication2(t *testing.T) {
 		index := arr[i]
 		if len(content[index]) == leaderLogSize {
 			count++
-		} else {
-			fmt.Println("length of logs", index, len(content[index]), leaderLogSize)
 		}
 	}
 	if count < majority {
-		fmt.Println("Failed test case: majority of servers should have the same length of logs as leader", count)
 		t.Errorf("Failed test case: majority of servers should have the same length of logs as leader")
-		ServerTeardown(restServersArr)
-		return
 	}
 
 	for i := 0; i < leaderLogSize; i++ {
@@ -140,18 +147,9 @@ func TestLogReplication2(t *testing.T) {
 		}
 		if count < majority {
 			t.Errorf("Failed test case: majority of servers log content is not matching")
-			ServerTeardown(restServersArr)
-			return
 		}
 	}
 
-	if keys_not_found > 0 || key_value_mismatch > 0 {
-		t.Errorf("Failed test case: Keys not found => %d, keys value mismatch => %d", keys_not_found, key_value_mismatch)
-	}
-
-	if put_key_unsuccessful > 0 {
-		fmt.Println("Unsuccessful Put Keys => ", put_key_unsuccessful)
-	}
-
-	ServerTeardown(restServersArr)
+	// ServerTeardown(servers)       // kill old config servers
+	// ServerTeardown(newServersArr) // kill newwly added servers
 }
