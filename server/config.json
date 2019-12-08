@@ -2,77 +2,77 @@
     "servers": [
         {
             "port":     "8001",
-            "host":     "localhost",
+            "host":     "10.10.1.1",
             "filename": "./0.txt",
             "logfile":  "./log-0.txt",
             "metadata": "./metadata-0.txt"
         },
         {
             "port":     "8002",
-            "host":     "localhost",
+            "host":     "10.10.1.2",
             "filename": "./1.txt",
             "logfile":  "./log-1.txt",
             "metadata": "./metadata-1.txt"
         },
         {
             "port":     "8003",
-            "host":     "localhost",
+            "host":     "10.10.1.3",
             "filename": "./2.txt",
             "logfile":  "./log-2.txt",
             "metadata": "./metadata-2.txt"
         },
         {
             "port":     "8004",
-            "host":     "localhost",
+            "host":     "10.10.1.1",
             "filename": "./3.txt",
             "logfile":  "./log-3.txt",
             "metadata": "./metadata-3.txt"
         },
         {
             "port":     "8005",
-            "host":     "localhost",
+            "host":     "10.10.1.2",
             "filename": "./4.txt",
             "logfile":  "./log-4.txt",
             "metadata": "./metadata-4.txt"
         },
         {
             "port":     "8006",
-            "host":     "localhost",
+            "host":     "10.10.1.3",
             "filename": "./5.txt",
             "logfile":  "./log-5.txt",
             "metadata": "./metadata-5.txt"
         },
         {
             "port":     "8007",
-            "host":     "localhost",
+            "host":     "10.10.1.1",
             "filename": "./7.txt",
             "logfile":  "./log-7.txt",
             "metadata": "./metadata-7.txt"
         },
         {
             "port":     "8008",
-            "host":     "localhost",
+            "host":     "10.10.1.2",
             "filename": "./8.txt",
             "logfile":  "./log-8.txt",
             "metadata": "./metadata-8.txt"
         },
         {
             "port":     "8009",
-            "host":     "localhost",
+            "host":     "10.10.1.3",
             "filename": "./9.txt",
             "logfile":  "./log-9.txt",
             "metadata": "./metadata-9.txt"
         },
         {
             "port":     "8010",
-            "host":     "localhost",
+            "host":     "10.10.1.1",
             "filename": "./10.txt",
             "logfile":  "./log-10.txt",
             "metadata": "./metadata-10.txt"
         },
         {
             "port":     "8011",
-            "host":     "localhost",
+            "host":     "10.10.1.2",
             "filename": "./11.txt",
             "logfile":  "./log-11.txt",
             "metadata": "./metadata-11.txt"

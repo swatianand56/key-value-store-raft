@@ -128,7 +128,6 @@ func kv739_get(key string, value *string) int {
 }
 
 func executePutKey(key string, value string, oldValue *string, address string) int {
-	fmt.Println("calling " + key)
 	if len(address) > 0 {
 		conn, err = net.DialTimeout("tcp", address, 250*time.Millisecond)
 	}

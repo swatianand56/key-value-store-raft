@@ -387,7 +387,6 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
 func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
-	fmt.Println("received request vote")
 	me.mux.Lock()
 	allServers := serversUnion(me.newServers, me.activeServers)
 	me.mux.Unlock()
@@ -449,9 +448,6 @@ func (me *RaftServer) Sleep(ms time.Duration, slept *time.Duration) error {
 
 func (me *RaftServer) CurrentState(input int, state *RaftServer) error {
 	// copies state from the server to return it for inspection.
-
-	fmt.Println("getting current state")
-	fmt.Println(me.currentTerm)
 
 	state.serverIndex = me.serverIndex // just in case I get *really* confused.
 	state.currentTerm = me.currentTerm
@@ -669,7 +665,6 @@ func LeaderElection() error {
 						if err != nil {
 							fmt.Println("Error in request vote", err)
 						}
-						fmt.Println("Vote granted by server ", index, requestVoteResponses[index])
 						if requestVoteResponses[index].VoteGranted {
 							le.mux.Lock()
 							if isElementPresentInArray(activeServers, index) {
@@ -684,7 +679,6 @@ func LeaderElection() error {
 									le.wg.Done()
 								}
 							}
-							fmt.Println("majority counts ", le.majorityCounter, le.majorityCounterNew)
 							le.mux.Unlock()
 						} else {
 							if requestVoteResponses[index].CurrentTerm > currentElectionTerm {
@@ -948,7 +942,6 @@ func Init(index int) error {
 		lines = strings.Split(string(fileContent), "\n")
 	}
 
-	fmt.Println("length of logs ======> ", len(lines))
 	for index := range lines {
 		line := strings.Split(lines[index], ",")
 		thisLog := LogEntry{Key: line[0], Value: line[1], TermID: line[2], IndexID: line[3]}
@@ -1076,7 +1069,6 @@ func readActiveServers() {
 		me.activeServers = append(me.activeServers, serverIndex)
 	}
 
-	fmt.Println(me.activeServers)
 }
 
 func main() {
