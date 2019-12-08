@@ -12,11 +12,11 @@ import (
 
 // Membership changes (leader part of new config)
 func TestMembershipChanges1(t *testing.T) {
-	var activeServerFilename = "./activeServers.cfg"
+	removeTextFile()
 
+	var activeServerFilename = "./activeServers.cfg"
 	oldConfigStr := "0,1,2"
 	serverToAddInNewConfigStr := "3,4" // and leader
-
 	serverList := []string{
 		"localhost:8001",
 		"localhost:8002",
