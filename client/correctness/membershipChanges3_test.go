@@ -102,7 +102,7 @@ func TestMembershipChanges3(t *testing.T) {
 	}
 
 	currentLeaderIndex := strconv.Itoa(leaderIndex)
-	time.Sleep(time.Duration(1) * time.Second) // buffer time to sync logs int all the servers
+	time.Sleep(time.Duration(1) * time.Second) // buffer time to sync logs int all the servers, probably should wait more as client might be still running
 
 	arr := newServerConfigArr // check the logs of new server config
 	var content = make(map[string][]string)
