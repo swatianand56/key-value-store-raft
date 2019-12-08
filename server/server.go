@@ -1074,6 +1074,14 @@ func readActiveServers() {
 func main() {
 	args := os.Args[1:]
 	serverIndex, _ := strconv.Atoi(args[0])
+	pid := os.Getpid()
+	processFile := strconv.Itoa(serverIndex) + "-pid.txt"
+	file, err := os.OpenFile(processFile, os.O_CREATE, 0644)
+	if err != nil {
+		fmt.Println("Unable to create process file")
+	}
+	file.Close()
+	_ = ioutil.WriteFile(processFile, []byte(strconv.Itoa(pid)), 0)
 	readConfigFile()
 	readActiveServers()
 	runServer(serverIndex)

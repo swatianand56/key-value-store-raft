@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"math"
-	"sort"
+	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,17 +20,17 @@ func isElementPresentInArray(arr []int, ele int) bool {
 
 func main() {
 	serverList := []string{
-		"localhost:8001",
-		"localhost:8002",
-		"localhost:8003",
-		"localhost:8004",
-		"localhost:8005",
-		"localhost:8006",
-		"localhost:8007",
-		"localhost:8008",
-		"localhost:8009",
-		"localhost:8010",
-		"localhost:8011",
+		"10.10.1.1:8001",
+		"10.10.1.2:8002",
+		"10.10.1.3:8003",
+		"10.10.1.1:8004",
+		"10.10.1.2:8005",
+		"10.10.1.3:8006",
+		"10.10.1.1:8007",
+		"10.10.1.2:8008",
+		"10.10.1.3:8009",
+		"10.10.1.1:8010",
+		"10.10.1.2:8011",
 	}
 	activeServers := []int{0, 1, 2}
 	unreachableServers := []int{}
@@ -37,6 +39,8 @@ func main() {
 	activeServersReqd := 3
 	const FailureCycles = 3
 	numFailureCycles := FailureCycles
+	serversToStart := []int{}
+	serversToKill := []int{}
 
 	for {
 		fmt.Println("sleeping for 10 seconds")
@@ -48,28 +52,31 @@ func main() {
 
 		fmt.Println("active servers are ---- ", activeServers, failureHandleCapacity, unreachableServers)
 
+		serversToStart = []int{}
+		serversToStart = []int{}
+
 		var serverStatus int
 		numFailures := 0
 
 		// make a check over unreachable servers and remove them from the list if they are now reachable
 
-		for index, server := range unreachableServers {
-			fmt.Println("checking unreachable server ", server)
-			if kv739_init([]string{serverList[server]}, 1) == 0 {
-				unreachableServers[index] = -1
-			}
-		}
+		// for index, server := range unreachableServers {
+		// 	fmt.Println("checking unreachable server ", server)
+		// 	if kv739_init([]string{serverList[server]}, 1) == 0 {
+		// 		unreachableServers[index] = -1
+		// 	}
+		// }
 
-		sort.Slice(unreachableServers, func(i, j int) bool {
-			return unreachableServers[i] < unreachableServers[j]
-		})
+		// sort.Slice(unreachableServers, func(i, j int) bool {
+		// 	return unreachableServers[i] < unreachableServers[j]
+		// })
 
-		for index, server := range unreachableServers {
-			if server == -1 {
-				unreachableServers = unreachableServers[:index]
-				break
-			}
-		}
+		// for index, server := range unreachableServers {
+		// 	if server == -1 {
+		// 		unreachableServers = unreachableServers[:index]
+		// 		break
+		// 	}
+		// }
 
 		for index, server := range activeServers {
 			fmt.Println("checking active server ", server)
@@ -119,11 +126,38 @@ func main() {
 				if !isElementPresentInArray(activeServers, i) && !isElementPresentInArray(unreachableServers, i) {
 					fmt.Println("adding server", i, "to list of active servers")
 					activeServers = append(activeServers, i)
+					serversToStart = append(serversToStart, i)
 					numServersToAdd--
 				}
 			}
 		} else if activeServersReqd < len(activeServers) {
+			for i := activeServersReqd; i < len(activeServers); i++ {
+				serversToKill = append(serversToKill, i)
+			}
 			activeServers = activeServers[:activeServersReqd]
+		}
+
+		if len(serversToStart) > 0 {
+			for _, server := range serversToStart {
+				cmd := exec.Command("ssh", strings.Split(serverList[server], ":")[0])
+				err := cmd.Run()
+				if err != nil {
+					fmt.Println("could not ssh into another machine")
+					continue
+				}
+				cmd = exec.Command("cd", "~/key-value-store-raft/server")
+				err = cmd.Run()
+				if err != nil {
+					fmt.Println("could not cd into server directory")
+					continue
+				}
+				cmd = exec.Command("go", "run", "server.go", "sharedTypes.go", strconv.Itoa(server), "&", ">", strconv.Itoa(server)+"serverlogs.txt")
+				err = cmd.Run()
+				if err != nil {
+					fmt.Println("could not start the server process")
+					continue
+				}
+			}
 		}
 
 		if activeServersReqd != len(activeServers) {
@@ -136,6 +170,32 @@ func main() {
 			fmt.Println("Change membership is not successful to the given configuration ", activeServers)
 		} else {
 			fmt.Println("Change membership is successful to the given configuration", activeServers)
+			if len(serversToKill) > 0 {
+				for _, server := range serversToKill {
+					cmd := exec.Command("ssh", strings.Split(serverList[server], ":")[0])
+					err := cmd.Run()
+					if err != nil {
+						fmt.Println("could not ssh into another machine")
+						continue
+					}
+					cmd = exec.Command("cd", "~/key-value-store-raft/server")
+					err = cmd.Run()
+					if err != nil {
+						fmt.Println("could not cd into server directory")
+						continue
+					}
+					pid, err := exec.Command("cat", strconv.Itoa(server)+"-pid.txt").Output()
+					if err != nil {
+						fmt.Println("could not fetch the PID to kill server process")
+						continue
+					}
+					cmd = exec.Command("kill", string(pid))
+					err = cmd.Run()
+					if err != nil {
+						fmt.Println("could not kill server process")
+					}
+				}
+			}
 		}
 	}
 }
