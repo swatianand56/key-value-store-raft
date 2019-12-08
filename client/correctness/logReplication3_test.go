@@ -10,8 +10,7 @@ import (
 
 // Log replication — n servers failed (rest servers should get log replication)
 func TestLogReplication3(t *testing.T) {
-	var path = "./../../server/"
-	var activeServerFilename = path + "activeServers.cfg"
+	var activeServerFilename = "./activeServers.cfg"
 
 	configStr := "0,1,2,3,4"
 	serversToKill := "0,1,2"

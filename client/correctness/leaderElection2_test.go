@@ -16,8 +16,7 @@ import (
 
 // Leader election success - sleep for max electiontimeout (ping all servers — everyone should have same leader)
 func TestLeaderElection2(t *testing.T) {
-	var path = "./../../server/"
-	var activeServerFilename = path + "activeServers.cfg"
+	var activeServerFilename = "./activeServers.cfg"
 
 	configStr := "0,1,2,3,4"
 
@@ -44,7 +43,6 @@ func TestLeaderElection2(t *testing.T) {
 	var leaderIndexes = make([]int, 0)
 	for i := range arr {
 		index, _ := strconv.Atoi(arr[i])
-		// CurrentState
 		conn, err = net.DialTimeout("tcp", serverList[index], 250*time.Millisecond)
 		if err == nil {
 			client = rpc.NewClient(conn)
