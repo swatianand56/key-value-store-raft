@@ -90,9 +90,7 @@ func main() {
 			}
 		}
 
-		sort.Slice(activeServers, func(i, j int) bool {
-			return activeServers[i] < activeServers[j]
-		})
+		sort.Sort(sort.Reverse(sort.IntSlice(activeServers)))
 
 		for index, server := range activeServers {
 			if server == -1 {
