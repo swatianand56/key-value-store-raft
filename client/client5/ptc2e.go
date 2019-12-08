@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func ptc2c() {
+func ptc2e() {
 	serverList := []string{
 		"localhost:8001",
 		"localhost:8002",
@@ -15,23 +15,22 @@ func ptc2c() {
 	fmt.Println("Calling init -- ", kv739_init(serverList, 3))
 	// var start_time = time.Now()
 	var oldValue string
-	var put_failures = 0
+
 	var not_found = 0
 	var wrong_values_count = 0
 
-	start := time.Now()
+	var put_failures = 0
+	// var number_of_keys = 100
 
-	for i := 20000; i < 30000; i++ {
+	start := time.Now()
+	for i := 40000; i < 50000; i++ {
 		var key = strconv.Itoa(i)
-		var result = kv739_put(key, key, &oldValue)
-		if result == -1 {
-			put_failures++
-		}
+		kv739_put(key, key, &oldValue)
 	}
 
 	put_end := time.Now()
 
-	for i := 666; i < 999; i++ {
+	for i := 0; i < 333; i++ {
 		var key = strconv.Itoa(i)
 		var x = kv739_get(key, &oldValue)
 		if x == -1 {
@@ -52,5 +51,6 @@ func ptc2c() {
 
 	fmt.Println("Keys Not Found => ", not_found)
 	fmt.Println("Value wrong Found =>", wrong_values_count)
-	fmt.Println("done ptc2c")
+
+	fmt.Println("done ptc2e")
 }

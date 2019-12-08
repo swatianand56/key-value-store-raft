@@ -109,7 +109,6 @@ func kv739_get(key string, value *string) int {
 }
 
 func executePutKey(key string, value string, oldValue *string, address string) int {
-	fmt.Println("calling " + key)
 	if len(address) > 0 {
 		conn, err = net.DialTimeout("tcp", address, 250*time.Millisecond)
 	}
@@ -119,7 +118,6 @@ func executePutKey(key string, value string, oldValue *string, address string) i
 		defer client.Close()
 		defer conn.Close()
 		err = client.Call("RaftServer.PutKey", KeyValuePair{Key: key, Value: value}, oldValue)
-		fmt.Println("executePutKey ======", err)
 		if err == nil {
 			if len(*oldValue) > 0 {
 				return 0
