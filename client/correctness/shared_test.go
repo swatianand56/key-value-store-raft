@@ -3,10 +3,31 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 )
 
 var servers = make(map[string]*os.Process)
+
+func removeTextFile() {
+	pathS, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	filepath.Walk(pathS, func(path string, f os.FileInfo, _ error) error {
+		if !f.IsDir() {
+			r, err := regexp.MatchString(".txt", f.Name())
+			if err == nil && r {
+				err = os.Remove(f.Name())
+				if err != nil {
+					fmt.Println("Failed to delete txt file with name", f.Name())
+				}
+			}
+		}
+		return nil
+	})
+}
 
 func ServerSetup(debugFlag int, serverList []string, serverIndexes []string) {
 	// see sharedTypes.go::VerboseFlags:

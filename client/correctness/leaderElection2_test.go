@@ -16,10 +16,10 @@ import (
 
 // Leader election success - sleep for max electiontimeout (ping all servers — everyone should have same leader)
 func TestLeaderElection2(t *testing.T) {
+	removeTextFile()
+
 	var activeServerFilename = "./activeServers.cfg"
-
 	configStr := "0,1,2,3,4"
-
 	serverList := []string{
 		"localhost:8001",
 		"localhost:8002",

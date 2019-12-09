@@ -12,8 +12,9 @@ import (
 
 // Log Replication (put key 100, get key 100 — log to be replicated on all servers) — no server failures (order of logs should be same) — no of keys put, get and lost (applied)
 func TestLogReplication1(t *testing.T) {
-	var activeServerFilename = "./activeServers.cfg"
+	removeTextFile()
 
+	var activeServerFilename = "./activeServers.cfg"
 	configStr := "0,1,2,3,4"
 	serverList := []string{
 		"localhost:8001",

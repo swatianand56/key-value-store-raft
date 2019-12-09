@@ -12,13 +12,9 @@ import (
 
 // Log replication — n servers failed (rest servers should get log replication)
 func TestLogReplication2(t *testing.T) {
-	var path = "./../../server/"
+	removeTextFile()
+
 	var activeServerFilename = "./activeServers.cfg"
-
-	configStr := "0,1,2,3,4"
-	serversToKill := "0,1"
-	restServers := "2,3,4"
-
 	serverList := []string{
 		"localhost:8001",
 		"localhost:8002",
@@ -26,6 +22,9 @@ func TestLogReplication2(t *testing.T) {
 		"localhost:8004",
 		"localhost:8005",
 	}
+	configStr := "0,1,2,3,4"
+	serversToKill := "0,1"
+	restServers := "2,3,4"
 
 	err := ioutil.WriteFile(activeServerFilename, []byte(configStr), 0)
 	if err != nil {
