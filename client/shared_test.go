@@ -1,24 +1,20 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/rpc"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 )
 
-var server0, server1, server2 *os.Process
-
-var serverList = []string{
-	"localhost:8001",
-	"localhost:8002",
-	"localhost:8003",
-}
+var servers []*os.Process
 
 func ServerSleep(serverIndex int, sleepTime time.Duration, sleptTime *time.Duration) error {
-	conn, err := net.DialTimeout("tcp", serverList[serverIndex], sleepTime+(250*time.Millisecond))
+	conn, err := net.DialTimeout("tcp", config.Servers[serverIndex].Host+":"+config.Servers[serverIndex].Port, sleepTime+(250*time.Millisecond))
 
 	if err == nil {
 		client := rpc.NewClient(conn)
@@ -34,7 +30,29 @@ func ServerSleep(serverIndex int, sleepTime time.Duration, sleptTime *time.Durat
 }
 
 func ServerCall(serverCall string, serverIndex int, input interface{}, output interface{}) error {
-	conn, err := net.DialTimeout("tcp", serverList[serverIndex], 250*time.Millisecond)
+	return ServerCallTime(serverCall, serverIndex, input, output, 250*time.Millisecond)
+}
+func ServerCallLong(serverCall string, serverIndex int, input interface{}, output interface{}) error {
+	return ServerCallTime(serverCall, serverIndex, input, output, 30*time.Second)
+}
+func ServerCallTime(serverCall string, serverIndex int, input interface{}, output interface{}, deadline time.Duration) error {
+	conn, err := net.DialTimeout("tcp", config.Servers[serverIndex].Host+":"+config.Servers[serverIndex].Port, 250*time.Millisecond)
+
+	fmt.Println(serverCall, serverIndex, input, output)
+
+	if err == nil {
+		client := rpc.NewClient(conn)
+		defer client.Close()
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(deadline))
+		err = client.Call("RaftServer."+serverCall, input, output)
+	}
+
+	return err
+}
+
+func ServerCallByIp(serverCall string, server string, input interface{}, output interface{}) error {
+	conn, err := net.DialTimeout("tcp", server, 250*time.Millisecond)
 
 	if err == nil {
 		client := rpc.NewClient(conn)
@@ -47,7 +65,7 @@ func ServerCall(serverCall string, serverIndex int, input interface{}, output in
 	return err
 }
 
-func ServerSetup(debugFlag int) {
+func ServerSetup(numServers int, verboseFlags int) (int, []int, int) {
 	// see sharedTypes.go::VerboseFlags:
 	//
 	// ALL          1
@@ -55,39 +73,82 @@ func ServerSetup(debugFlag int) {
 	// CONNECTIONS  4
 	// READS        8
 	// WRITES       16
+	// VOTES        32
+	// LIVENESS     64
+	// STATE        128
 	//
+	// returns: the leader server.
 
-	attr1 := new(os.ProcAttr)
-	attr1.Files = []*os.File{os.Stdin, os.Stdout, os.Stderr}
-	attr2 := new(os.ProcAttr)
-	attr2.Files = []*os.File{os.Stdin, os.Stdout, os.Stderr}
-	attr3 := new(os.ProcAttr)
-	attr3.Files = []*os.File{os.Stdin, os.Stdout, os.Stderr}
+	leader := -1
 
-	fmt.Println("TYPE | SERVER | TIMESTAMP | MESSAGE")
+	if numServers < 1 {
+		fmt.Println("ServerSetup numServers")
+	}
 
-	server0, err = os.StartProcess("../server/server", []string{"../server/server", "0", strconv.Itoa(debugFlag)}, attr1)
-	if err != nil {
-		fmt.Println("Server 0 Error:", err)
+	var server *os.Process
+
+	servers = make([]*os.Process, numServers)
+
+	// start servers
+	for i := 0; i < numServers; i++ {
+		attr := new(os.ProcAttr)
+		attr.Files = []*os.File{os.Stdin, os.Stdout, os.Stderr}
+		server, err = os.StartProcess("../server/server", []string{"../server/server", strconv.Itoa(i), strconv.Itoa(verboseFlags)}, attr)
+		if err != nil {
+			fmt.Println("Server 0 Error:", err)
+		} else {
+			debugMessage(verboseFlags, i, VERBOSE.LIVENESS, "Starting server.")
+			servers[i] = server
+		}
 	}
-	server1, err = os.StartProcess("../server/server", []string{"../server/server", "1", strconv.Itoa(debugFlag)}, attr2)
+
+	// give them half a second to start up.
+	time.Sleep(500 * time.Millisecond)
+
+	// synchronize live servers
+	cmd := exec.Command("../config_manager/config_manager", "--hurry", "--once")
+	err := cmd.Run()
+
+	// couldn't sync servers, there's nothing to test.
 	if err != nil {
-		fmt.Println("Server 1 Error:", err)
+		fmt.Println("ServerSetup config_manager_policy err:", err)
+		ServerTeardown(verboseFlags)
+		return -1, []int{-1}, -1
 	}
-	server2, err = os.StartProcess("../server/server", []string{"../server/server", "2", strconv.Itoa(debugFlag)}, attr3)
-	if err != nil {
-		fmt.Println("Server 2 Error:", err)
+
+	var state *RaftServerSnapshot
+	state = &RaftServerSnapshot{}
+	// get current leader
+	i := 0
+	for i = 0; leader < 0 && i < 10; i++ {
+		state = &RaftServerSnapshot{}
+		err = ServerCallByIp("GetState", "localhost:8001", 0, state)
+
+		if err == nil {
+			leader = state.LeaderIndex
+		} else {
+			fmt.Printf("err: %s", err.Error())
+			err = nil
+		}
+
+		if leader == -1 {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
+
+	readConfigFile()
+
+	var activeServers []int
+	err = json.Unmarshal([]byte(state.ActiveServers), &activeServers)
+
+	return leader, activeServers, i
 }
 
-func ServerTeardown() {
-	if server0 != nil {
-		server0.Kill()
-	}
-	if server1 != nil {
-		server1.Kill()
-	}
-	if server2 != nil {
-		server2.Kill()
+func ServerTeardown(verboseFlags int) {
+	for i, server := range servers {
+		if server != nil {
+			debugMessage(verboseFlags, i, VERBOSE.LIVENESS, "Killing server.")
+			server.Kill()
+		}
 	}
 }

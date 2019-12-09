@@ -1,57 +1,26 @@
 package main
 
+/*
+someone must be able to be elected leader in a reasonably short amount of time.
+*/
+
 import (
 	"fmt"
-	"math/rand"
 	"testing"
-	"time"
 )
 
 func TestLeaderElection(t *testing.T) {
-	i := 0
-	sleepTime := 500 * time.Millisecond
-	startTime := time.Now()
-	state := &RaftServerSnapshot{}
-	var slept *time.Duration
+	flags := 0 // VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
 
-	ServerSetup(2)
+	debugMessage(flags, -1, VERBOSE.STATE, "Starting leader election test.")
+	leader, _, iters := ServerSetup(3, flags)
 
-	// let servers start up.
-	time.Sleep(500 * time.Millisecond)
-
-	for ; state.LeaderIndex < 1 && i < 10; i++ {
-		// put server 0 to sleep, let peers react to loss of leader.
-		err = ServerSleep(0, sleepTime, slept)
-
-		if err == nil {
-			// get current node state from server 1 or 2
-			err = ServerCall("GetState", rand.Int()%2+1, 0, state)
-
-			if err == nil {
-				if state.LeaderIndex == 0 {
-					fmt.Printf("After %s sleep, %d thinks 0 is the leader!\n", sleepTime, state.ServerIndex)
-					fmt.Println("state:", state)
-					//t.Errorf("After %s sleep, %d thinks 0 is the leader!\n", sleepTime, state.ServerIndex)
-				} else if state.LeaderIndex == -1 {
-					fmt.Printf("After %s sleep, %d thinks no server is the leader!\n", sleepTime, state.ServerIndex)
-					fmt.Println("state:", state)
-					//t.Errorf("After %s sleep, %d thinks no server is the leader!", sleepTime, state.ServerIndex)
-				}
-			} else {
-				fmt.Println("Could not get server state:", err)
-				// t.Errorf("Could not get server state: %s", err)
-			}
-		} else {
-			fmt.Println("Slept for", slept, "ms", err)
-			// t.Errorf("Slept for %d ms: %s", slept, err)
-		}
-	}
-
-	if i >= 10 {
-		t.Errorf("Could not elect a new leader after %d - %s rounds in %s.\n", i, sleepTime, time.Since(startTime))
+	if leader < 0 {
+		debugMessage(flags, -1, VERBOSE.STATE, "Failed leader election test.")
+		t.Errorf("Couldn't elect a leader in 10x 500ms rounds.")
 	} else {
-		fmt.Printf("Elected %d as new leader after %d - %s rounds in %s.\n", state.LeaderIndex, i, sleepTime, time.Since(startTime))
-
+		debugMessage(flags, -1, VERBOSE.STATE, fmt.Sprintf("Finished leader election test in %d rounds", iters))
 	}
-	ServerTeardown()
+
+	ServerTeardown(flags)
 }

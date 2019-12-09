@@ -6,6 +6,14 @@
 
 # Motivation
 
+# New Raft Features
+
+## Dynamic Load Balancing
+
+### Limitations
+
+Currently, dynamic load balancing doesn't add servers in bulk.  Rather, once a single server requests to be added to the pool the work request is immediately executed by the leader, requiring one round per added server.  A future improvement could be to bulk-add new servers outside of the server-startup process.  This would allow the spontaneous merging of clusters.  However, since cluster merging was not a goal, this approach was not a necessary to implement at this time, and keeps the cluster addition process simpler.
+
 # Experimental Design
 
 # Testing
