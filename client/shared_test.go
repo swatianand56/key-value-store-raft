@@ -13,28 +13,17 @@ import (
 
 var servers []*os.Process
 
-func ServerSleep(serverIndex int, sleepTime time.Duration, sleptTime *time.Duration) error {
-	conn, err := net.DialTimeout("tcp", config.Servers[serverIndex].Host+":"+config.Servers[serverIndex].Port, sleepTime+(250*time.Millisecond))
-
-	if err == nil {
-		client := rpc.NewClient(conn)
-		defer client.Close()
-		defer conn.Close()
-		//conn.SetDeadline(0) // time.Now().Add(sleepTime + (250 * time.Millisecond)))
-		err = client.Call("RaftServer.Sleep", &sleepTime, &sleptTime)
-	}
-
-	time.Sleep(sleepTime)
-
-	return err
-}
-
+// make an arbitrary call to the specified server.
 func ServerCall(serverCall string, serverIndex int, input interface{}, output interface{}) error {
 	return ServerCallTime(serverCall, serverIndex, input, output, 250*time.Millisecond)
 }
+
+// make an arbitrary call to the specified server with a 30-second timeout.
 func ServerCallLong(serverCall string, serverIndex int, input interface{}, output interface{}) error {
 	return ServerCallTime(serverCall, serverIndex, input, output, 30*time.Second)
 }
+
+// make an arbitrary call to the specified server with a custom timeout.
 func ServerCallTime(serverCall string, serverIndex int, input interface{}, output interface{}, deadline time.Duration) error {
 	conn, err := net.DialTimeout("tcp", config.Servers[serverIndex].Host+":"+config.Servers[serverIndex].Port, 250*time.Millisecond)
 
@@ -51,6 +40,8 @@ func ServerCallTime(serverCall string, serverIndex int, input interface{}, outpu
 	return err
 }
 
+// make an arbitrary call to the any server with a custom timeout.
+// good for explicitly calling server 0 before the servers array has been initialized.
 func ServerCallByIp(serverCall string, server string, input interface{}, output interface{}) error {
 	conn, err := net.DialTimeout("tcp", server, 250*time.Millisecond)
 
@@ -65,6 +56,14 @@ func ServerCallByIp(serverCall string, server string, input interface{}, output 
 	return err
 }
 
+/*
+start up a cluster with the specified number of servers and debug flags.
+
+1. starts up the specified number of servers.
+2. runs the config manager just once to teach each live server about the others
+3. tries to identify the leader by querying server0 (localhost:8001) every 500ms, up to 10 times.
+4. returns the active server ID, the list of active servers, and the number of iterations required to identify a leader.
+*/
 func ServerSetup(numServers int, verboseFlags int) (int, []int, int) {
 	// see sharedTypes.go::VerboseFlags:
 	//
