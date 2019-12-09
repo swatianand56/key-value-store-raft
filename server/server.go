@@ -545,12 +545,13 @@ func applyEntries() {
 				if !keyFound {
 					me.data = append(me.data, KeyValuePair{Key: currentLog.Key, Value: currentLog.Value})
 				}
-			}
-			data := me.data
 
-			err := writeDataInFile(data)
-			if err != nil {
-				fmt.Println("error in writing data at file", err)
+				data := me.data
+
+				err := writeDataInFile(data)
+				if err != nil {
+					fmt.Println("error in writing data at file", err)
+				}
 			}
 		}
 	}
