@@ -1,0 +1,402 @@
+Mon, 09 Dec 2019 12:07:28 -0600
+DEBUG | STATE | -1 | 0.022ms | Starting leader election test.
+DEBUG | STATE | -1 | 526.612ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.535s
+DEBUG | STATE | -1 | 0.024ms | Starting leader election test.
+DEBUG | STATE | -1 | 942.041ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.950s
+DEBUG | STATE | -1 | 0.029ms | Starting leader election test.
+DEBUG | STATE | -1 | 522.379ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.527s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 944.190ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.951s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 521.728ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.527s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 518.730ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.523s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 949.803ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.957s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 525.668ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.533s
+DEBUG | STATE | -1 | 0.022ms | Starting leader election test.
+DEBUG | STATE | -1 | 519.356ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.526s
+DEBUG | STATE | -1 | 0.020ms | Starting leader election test.
+DEBUG | STATE | -1 | 533.451ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.538s
+DEBUG | STATE | -1 | 0.029ms | Starting leader election test.
+DEBUG | STATE | -1 | 944.477ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.954s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 934.683ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.942s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 530.995ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.539s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 523.620ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.530s
+DEBUG | STATE | -1 | 0.028ms | Starting leader election test.
+DEBUG | STATE | -1 | 522.015ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.527s
+DEBUG | STATE | -1 | 0.020ms | Starting leader election test.
+DEBUG | STATE | -1 | 529.400ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.537s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 1869.968ms | Finished 50ms leader election test in 27 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.877s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 524.663ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.532s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 524.393ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.530s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 931.015ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.937s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 518.136ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.524s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 520.580ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.526s
+DEBUG | STATE | -1 | 0.023ms | Starting leader election test.
+DEBUG | STATE | -1 | 933.685ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.938s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 1339.100ms | Finished 50ms leader election test in 17 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.345s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 928.022ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.933s
+DEBUG | STATE | -1 | 0.022ms | Starting leader election test.
+DEBUG | STATE | -1 | 521.332ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.528s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 929.937ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.936s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 1094.112ms | Finished 50ms leader election test in 12 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.101s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 520.574ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.526s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 928.793ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.936s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 525.400ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.531s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 527.088ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.532s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 938.765ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.944s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 524.476ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.529s
+DEBUG | STATE | -1 | 0.020ms | Starting leader election test.
+DEBUG | STATE | -1 | 515.857ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.522s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 518.273ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.525s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 517.679ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.524s
+DEBUG | STATE | -1 | 0.023ms | Starting leader election test.
+DEBUG | STATE | -1 | 522.106ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.528s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 514.133ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.520s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 517.716ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.524s
+DEBUG | STATE | -1 | 0.026ms | Starting leader election test.
+DEBUG | STATE | -1 | 519.657ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.526s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 936.535ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.942s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 527.497ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.534s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 1353.509ms | Finished 50ms leader election test in 17 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.360s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 526.178ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.530s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 1084.631ms | Finished 50ms leader election test in 12 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.091s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 933.250ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.939s
+DEBUG | STATE | -1 | 0.020ms | Starting leader election test.
+DEBUG | STATE | -1 | 529.297ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.534s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 944.700ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.952s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 940.281ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.945s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 528.674ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.533s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 941.565ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.946s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 523.763ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.529s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 1095.217ms | Finished 50ms leader election test in 12 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.100s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 935.624ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.941s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 527.799ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.532s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 518.516ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.525s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 524.750ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.530s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 930.258ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.934s
+DEBUG | STATE | -1 | 0.020ms | Starting leader election test.
+DEBUG | STATE | -1 | 2178.497ms | Finished 50ms leader election test in 33 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	2.185s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 1044.804ms | Finished 50ms leader election test in 11 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.049s
+DEBUG | STATE | -1 | 0.020ms | Starting leader election test.
+DEBUG | STATE | -1 | 515.414ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.523s
+DEBUG | STATE | -1 | 0.024ms | Starting leader election test.
+DEBUG | STATE | -1 | 517.075ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.522s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 518.061ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.524s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 519.520ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.527s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 890.055ms | Finished 50ms leader election test in 8 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.896s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 526.068ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.533s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 527.507ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.533s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 516.751ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.522s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 1487.412ms | Finished 50ms leader election test in 20 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.494s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 1351.090ms | Finished 50ms leader election test in 17 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.358s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 523.485ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.528s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 520.564ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.525s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 926.513ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.932s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 516.876ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.523s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 931.431ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.936s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 516.707ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.523s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 526.140ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.532s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 933.138ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.939s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 526.283ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.533s
+DEBUG | STATE | -1 | 0.023ms | Starting leader election test.
+DEBUG | STATE | -1 | 940.813ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.946s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 520.664ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.525s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 525.918ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.531s
+DEBUG | STATE | -1 | 0.019ms | Starting leader election test.
+DEBUG | STATE | -1 | 519.980ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.526s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 524.402ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.530s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 517.942ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.522s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 525.364ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.531s
+DEBUG | STATE | -1 | 0.017ms | Starting leader election test.
+DEBUG | STATE | -1 | 515.509ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.522s
+DEBUG | STATE | -1 | 0.015ms | Starting leader election test.
+DEBUG | STATE | -1 | 514.501ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.521s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 525.931ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.532s
+DEBUG | STATE | -1 | 0.022ms | Starting leader election test.
+DEBUG | STATE | -1 | 926.686ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.932s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 518.759ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.523s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 521.750ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.528s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 1042.852ms | Finished 50ms leader election test in 11 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.050s
+DEBUG | STATE | -1 | 0.018ms | Starting leader election test.
+DEBUG | STATE | -1 | 1083.289ms | Finished 50ms leader election test in 12 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	1.089s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 522.674ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.528s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 523.942ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.528s
+DEBUG | STATE | -1 | 0.016ms | Starting leader election test.
+DEBUG | STATE | -1 | 527.875ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.534s
+DEBUG | STATE | -1 | 0.021ms | Starting leader election test.
+DEBUG | STATE | -1 | 928.439ms | Finished 50ms leader election test in 9 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.933s
+DEBUG | STATE | -1 | 0.022ms | Starting leader election test.
+DEBUG | STATE | -1 | 525.046ms | Finished 50ms leader election test in 1 rounds
+PASS
+ok  	_/home/nick/my/documents/school/2019/cs739/p2/kvs-raft/client	0.530s
+Mon, 09 Dec 2019 12:09:39 -0600
