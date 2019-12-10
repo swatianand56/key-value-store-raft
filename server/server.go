@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -430,16 +431,31 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 	return nil
 }
 
-func (me *RaftServer) Sleep(duration time.Duration, slept *time.Duration) error {
-	// duration for a while, then reply with how long we slept.
-	me.alive = false
+func (me *RaftServer) Sleep(duration int, slept int) error {
+	// put server to sleep, schedule a future wakeup.
+
+	fmt.Println("Sleeping for", duration, slept)
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Sleeping for %s.", duration))
+	me.setAwake(0)
 	go me.wake(duration)
 	return nil
 }
 
-func (me *RaftServer) wake(duration time.Duration) {
-	time.Sleep(duration)
-	me.alive = true
+func (me *RaftServer) isAwake() int64 {
+	awake := atomic.LoadInt64(&me.awake)
+	fmt.Println("Awake?", awake)
+	return awake
+}
+
+func (me *RaftServer) setAwake(awake int64) {
+	atomic.StoreInt64(&me.awake, awake)
+}
+
+func (me *RaftServer) wake(duration int) {
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Waking in %s.", duration))
+	time.Sleep(time.Duration(duration * time.Millisecond)
+	me.setAwake(1)
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Woke up %s.", time.Now()))
 }
 
 func (me *RaftServer) GetState(args int, state *RaftServerSnapshot) error {
@@ -449,6 +465,7 @@ func (me *RaftServer) GetState(args int, state *RaftServerSnapshot) error {
 	if err == nil {
 		state.ActiveServers = string(marshal[:])
 	}
+	state.Awake = me.isAwake()
 	state.CommitIndex = me.commitIndex
 	state.CurrentTerm = me.currentTerm
 	state.DataLength = len(me.data)
@@ -473,7 +490,7 @@ func (me *RaftServer) GetState(args int, state *RaftServerSnapshot) error {
 
 func sendHeartbeat(i int) {
 	// send appendentries heartbeat rpc in async and no need to wait for response
-	if me.alive == false {
+	if me.isAwake() == 0 {
 		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, "No, am ded!")
 		return
 	}
@@ -957,7 +974,7 @@ func Init(index int, verbose int) error {
 
 	me.serverIndex = index
 	me.leaderIndex = -1
-	me.alive = true
+	me.setAwake(1)
 	me.verbose = verbose
 
 	// TODO: commitIndex and lastAppliedIndex can also be saved in metadata file
@@ -1046,7 +1063,8 @@ func Init(index int, verbose int) error {
 
 func runServer(serverIndex int, verbose int) (RaftServer, error) {
 	pid := os.Getpid()
-	fmt.Printf("Server %d starts with process id: %d\n", serverIndex, pid)
+
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.LIVENESS, fmt.Sprintf("Server %d starts with process id: %d", serverIndex, pid))
 
 	filename := config.Servers[serverIndex].Filename
 	logFileName := config.Servers[serverIndex].LogFile

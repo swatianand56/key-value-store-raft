@@ -27,8 +27,6 @@ func ServerCallLong(serverCall string, serverIndex int, input interface{}, outpu
 func ServerCallTime(serverCall string, serverIndex int, input interface{}, output interface{}, deadline time.Duration) error {
 	conn, err := net.DialTimeout("tcp", config.Servers[serverIndex].Host+":"+config.Servers[serverIndex].Port, 250*time.Millisecond)
 
-	fmt.Println(serverCall, serverIndex, input, output)
-
 	if err == nil {
 		client := rpc.NewClient(conn)
 		defer client.Close()
@@ -119,7 +117,7 @@ func ServerSetup(numServers int, verboseFlags int) (int, []int, int) {
 	state = &RaftServerSnapshot{}
 	// get current leader
 	i := 0
-	for i = 0; leader < 0 && i < 10; i++ {
+	for i = 0; leader < 0 && i < 200; i++ {
 		state = &RaftServerSnapshot{}
 		err = ServerCallByIp("GetState", "localhost:8001", 0, state)
 
@@ -131,7 +129,7 @@ func ServerSetup(numServers int, verboseFlags int) (int, []int, int) {
 		}
 
 		if leader == -1 {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 

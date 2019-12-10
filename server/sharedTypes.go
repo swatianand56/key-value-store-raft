@@ -23,7 +23,7 @@ type RaftServer struct {
 	logs        []LogEntry
 	data        []KeyValuePair
 	verbose     int
-	alive       bool
+	awake       int64 // just a bool
 
 	// when is it?
 	currentTerm       int // start value could be 0 (init from persistent storage during start)
@@ -57,6 +57,7 @@ type RaftServerSnapshot struct {
 	// a flat snapshot of the most recent data on a server
 	// see server.go::GetState
 	ActiveServers           string // actually stringified json-byte-array of int array: string(json.Marshal([]int))
+	Awake                   int64
 	ChangeMembership        bool
 	CommitIndex             int
 	CurrentTerm             int

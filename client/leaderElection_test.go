@@ -10,14 +10,16 @@ import (
 )
 
 func TestLeaderElection(t *testing.T) {
-	flags := 0 // VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
+	return
+
+	flags := VERBOSE.STATE // VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
 
 	debugMessage(flags, -1, VERBOSE.STATE, "Starting leader election test.")
-	leader, _, iters := ServerSetup(3, flags)
+	leader, _, iters := ServerSetup(clusterSize, flags)
 
 	if leader < 0 {
-		debugMessage(flags, -1, VERBOSE.STATE, "Failed leader election test.")
-		t.Errorf("Couldn't elect a leader in 10x 500ms rounds.")
+		debugMessage(flags, -1, VERBOSE.STATE, fmt.Sprintf("Failed leader election test: %d", iters))
+		t.Errorf(fmt.Sprintf("Couldn't elect a leader in %d rounds.", iters))
 	} else {
 		debugMessage(flags, -1, VERBOSE.STATE, fmt.Sprintf("Finished leader election test in %d rounds", iters))
 	}
