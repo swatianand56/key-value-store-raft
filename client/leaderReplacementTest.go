@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var clusterSize = 3
+var clusterSize = 5
 
 func main() {
 	TestLeaderReplacementLoop()
@@ -20,7 +20,7 @@ func TestLeaderReplacementLoop() {
 	stutters := []int{ /*50, 150, 250,*/ 500, 750, 1000}
 	for _, stutter := range stutters {
 		fmt.Println("Starting", stutter, "ms test.", time.Now())
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 20; i++ {
 			xTestLeaderReplacement(time.Duration(stutter) * time.Millisecond)
 		}
 		fmt.Println("Finished", stutter, "ms test.", time.Now())
@@ -29,7 +29,7 @@ func TestLeaderReplacementLoop() {
 
 // func xTestLeaderReplacement(t *testing.T, stutter time.Duration) {
 func xTestLeaderReplacement(stutter time.Duration) {
-	flags := VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
+	flags := 1 //VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
 	slept := 0 * time.Millisecond
 	var state = RaftServerSnapshot{}
 	iters := 0
@@ -49,7 +49,7 @@ func xTestLeaderReplacement(stutter time.Duration) {
 		// TODO: for full perf data // for iters = 0; leader == newLeader && time.Since(runTime) < 60*time.Second; iters++ {
 		for iters = 0; leader == newLeader && iters < 100; iters++ {
 			// put the leader to sleep for X time, then wait that long.
-			err = ServerCall("Sleep", leader, stutter.Milliseconds(), &slept)
+			err = ServerCall("Sleep", leader, int(stutter.Seconds()*1000), &slept)
 			if err != nil {
 				fmt.Println(err)
 			}
@@ -61,12 +61,11 @@ func xTestLeaderReplacement(stutter time.Duration) {
 				debugMessage(flags, -1, VERBOSE.HEARTBEATS, fmt.Sprintf("%d: Test woke up.", iters))
 			}
 
+			// FIXME: somehow we don't notice leader change when node 2 started as the leader.
+
 			// see if we've picked a new leader then.
 			ServerCall("GetState", (leader+1)%clusterSize, 0, &state)
 			newLeader = state.LeaderIndex
-			if iters > 10 {
-				debugMessage(flags, -1, VERBOSE.HEARTBEATS, fmt.Sprintf("%d: Test found leader %d.", iters, newLeader))
-			}
 		}
 
 		state := "Finished"

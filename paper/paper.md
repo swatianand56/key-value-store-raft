@@ -28,6 +28,10 @@ We were able to reuse the concept behind DSLabs to create single-threaded test s
 
 # Evaluation
 
+# Future Direction
+
+- Change leader election delay during repeated leader failures to handle correlated failures.
+
 # Related Works
 
 # Conclusion

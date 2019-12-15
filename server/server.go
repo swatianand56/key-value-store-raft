@@ -284,10 +284,11 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	defer me.mux.Unlock()
 	me.lastMessageTime = time.Now().UnixNano()
 
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, "Received heartbeat from "+strconv.Itoa(args.LeaderID))
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Received heartbeat %#+v.", args))
 
 	// heartbeat
 	if len(args.Entries) == 0 {
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: No entries.", args))
 		reply.CurrentTerm = args.LeaderTerm
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
@@ -299,12 +300,15 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 			if err != nil {
 				debugMessage(me.verbose, me.serverIndex,
 					VERBOSE.WRITES,
-					"Unable to write the new metadata information "+err.Error())
+					"AppendEntries: Unable to write the new metadata information "+err.Error())
 				return err
 			}
-		} else if args.LeaderTerm == me.currentTerm && me.leaderIndex == -1 {
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Bigger term, set leader.", args))
+		} else if args.LeaderTerm == me.currentTerm {
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Same term, set leader.", args))
 			me.leaderIndex = args.LeaderID
 		} else if args.LeaderTerm < me.currentTerm {
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Lower term, rejected leader.", args))
 			reply.CurrentTerm = me.currentTerm
 		}
 		return nil
@@ -325,7 +329,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 		metadataContent := [2]string{strconv.Itoa(me.currentTerm), "-1"}
 		err := ioutil.WriteFile(metadataFile, []byte(strings.Join(metadataContent[:], "\n")), 0)
 		if err != nil {
-			debugMessage(me.verbose, me.serverIndex, VERBOSE.WRITES, "Unable to write the new metadata information "+err.Error())
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.WRITES, "AppendEntries: Unable to write the new metadata information "+err.Error())
 		}
 	}
 
@@ -355,7 +359,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 
 	err := writeEntryToLogFile(me.logs)
 	if err != nil {
-		debugMessage(me.verbose, me.serverIndex, VERBOSE.WRITES, "Unable to replicate the log in appendEntries "+err.Error())
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.WRITES, "AppendEntries: Unable to replicate the log in appendEntries "+err.Error())
 		reply.Success = false
 		reply.CurrentTerm = args.LeaderTerm
 		return err
@@ -382,7 +386,7 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 // candidate term is the term proposed by candidate (current term + 1)
 // if receiver's term is greater then, currentTerm is returned and candidate has to update it's term (to be taken care in leader election)
 func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteResponse) error {
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, "received request vote")
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: received request vote: %#+v", args))
 	me.mux.Lock()
 	allServers := serversUnion(me.newServers, me.activeServers)
 	me.mux.Unlock()
@@ -402,6 +406,7 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 	if args.CandidateTerm < mycurrentTerm {
 		reply.CurrentTerm = mycurrentTerm
 		reply.VoteGranted = false
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: refused vote for %d, proposed term %d < my term %d", args.CandidateIndex, args.CandidateTerm, mycurrentTerm))
 		return nil
 	}
 
@@ -419,23 +424,25 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 			reply.VoteGranted = true
 			metadataContent := [2]string{strconv.Itoa(args.CandidateTerm), strconv.Itoa(args.CandidateIndex)}
 			err := ioutil.WriteFile(config.Servers[myserverIndex].Metadata, []byte(strings.Join(metadataContent[:], "\n")), 0)
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: approved vote for %d in term %d.", args.CandidateIndex, args.CandidateTerm))
 			if err != nil {
 				fmt.Println("Request Vote RPC: Unable to write to metadata file ", myserverIndex, mycurrentTerm, args.CandidateIndex)
 			}
 		}
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: refused vote for $d, term was good, but log was not.", args.CandidateIndex, args.CandidateTerm))
 	} else {
 		reply.CurrentTerm = mycurrentTerm
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: refused vote for %d, I already voted for %d in term %d.", args.CandidateIndex, me.serverVotedFor, args.CandidateTerm))
 		reply.VoteGranted = false
 	}
 
 	return nil
 }
 
-func (me *RaftServer) Sleep(duration int, slept int) error {
+func (me *RaftServer) Sleep(duration int, slept *int) error {
 	// put server to sleep, schedule a future wakeup.
 
-	fmt.Println("Sleeping for", duration, slept)
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Sleeping for %s.", duration))
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Sleep: Sleeping for %d.", duration))
 	me.setAwake(0)
 	go me.wake(duration)
 	return nil
@@ -443,7 +450,6 @@ func (me *RaftServer) Sleep(duration int, slept int) error {
 
 func (me *RaftServer) isAwake() int64 {
 	awake := atomic.LoadInt64(&me.awake)
-	fmt.Println("Awake?", awake)
 	return awake
 }
 
@@ -452,10 +458,32 @@ func (me *RaftServer) setAwake(awake int64) {
 }
 
 func (me *RaftServer) wake(duration int) {
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Waking in %s.", duration))
-	time.Sleep(time.Duration(duration * time.Millisecond)
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("wake: Waking in %d.", duration))
+	time.Sleep(time.Duration(duration) * time.Millisecond)
 	me.setAwake(1)
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("Woke up %s.", time.Now()))
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("wake: Woke up %s.", time.Now()))
+}
+
+func RaftServerToSnapshot(rs *RaftServer, rss *RaftServerSnapshot) {
+	rss.Awake = rs.isAwake()
+	rss.CommitIndex = rs.commitIndex
+	rss.CurrentTerm = rs.currentTerm
+	rss.DataLength = len(rs.data)
+	// rss.DataTail = rs.data[len(rs.data)-1]
+	rss.ElectionMaxTime = rs.electionMaxTime
+	rss.ElectionMinTime = rs.electionMinTime
+	rss.LastAppliedIndex = rs.lastAppliedIndex
+	rss.LastLogEntryIndex = rs.lastLogEntryIndex
+	rss.LastLogEntryTerm = rs.lastLogEntryTerm
+	rss.LastMessageTime = rs.lastMessageTime
+	rss.LeaderIndex = rs.leaderIndex
+	rss.LeaderHeartBeatDuration = rs.leaderHeartBeatDuration
+	rss.LogLength = len(rs.logs)
+	// rss.LogTail = rs.logs[len(rs.logs)-1]
+	// rss.MatchIndex = rs.matchIndex
+	// rss.NextIndex = rs.nextIndex
+	rss.ServerIndex = rs.serverIndex // just in case I get really confused.
+	rss.ServerVotedFor = rs.serverVotedFor
 }
 
 func (me *RaftServer) GetState(args int, state *RaftServerSnapshot) error {
@@ -465,25 +493,8 @@ func (me *RaftServer) GetState(args int, state *RaftServerSnapshot) error {
 	if err == nil {
 		state.ActiveServers = string(marshal[:])
 	}
-	state.Awake = me.isAwake()
-	state.CommitIndex = me.commitIndex
-	state.CurrentTerm = me.currentTerm
-	state.DataLength = len(me.data)
-	// state.DataTail = me.data[len(me.data)-1]
-	state.ElectionMaxTime = me.electionMaxTime
-	state.ElectionMinTime = me.electionMinTime
-	state.LastAppliedIndex = me.lastAppliedIndex
-	state.LastLogEntryIndex = me.lastLogEntryIndex
-	state.LastLogEntryTerm = me.lastLogEntryTerm
-	state.LastMessageTime = me.lastMessageTime
-	state.LeaderIndex = me.leaderIndex
-	state.LeaderHeartBeatDuration = me.leaderHeartBeatDuration
-	state.LogLength = len(me.logs)
-	// state.LogTail = me.logs[len(me.logs)-1]
-	// state.MatchIndex = me.matchIndex
-	// state.NextIndex = me.nextIndex
-	state.ServerIndex = me.serverIndex // just in case I get really confused.
-	state.ServerVotedFor = me.serverVotedFor
+
+	RaftServerToSnapshot(me, state)
 
 	return nil
 }
@@ -491,14 +502,13 @@ func (me *RaftServer) GetState(args int, state *RaftServerSnapshot) error {
 func sendHeartbeat(i int) {
 	// send appendentries heartbeat rpc in async and no need to wait for response
 	if me.isAwake() == 0 {
-		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, "No, am ded!")
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, "sendHeartbeat: No, am ded!")
 		return
 	}
 
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, "Sent heartbeat.")
 	conn, err := net.DialTimeout("tcp", config.Servers[i].Host+":"+config.Servers[i].Port, 150*time.Millisecond)
 	if err != nil {
-		debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "Leader unable to create connection with another server "+err.Error())
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "sendHeartbeat: Leader unable to create connection with another server "+err.Error())
 	} else {
 		conn.SetDeadline(time.Now().Add(150 * time.Millisecond))
 		client := rpc.NewClient(conn)
@@ -511,9 +521,16 @@ func sendHeartbeat(i int) {
 		myserverIndex := me.serverIndex
 		mylastAppliedIndex := me.lastAppliedIndex
 		me.mux.Unlock()
-		client.Call("RaftServer.AppendEntries", AppendEntriesArgs{LeaderTerm: mycurrentTerm, LeaderID: myserverIndex,
-			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: mylastAppliedIndex},
+
+		appendEntriesArgs := AppendEntriesArgs{LeaderTerm: mycurrentTerm, LeaderID: myserverIndex,
+			PrevLogIndex: -1, PrevLogTerm: -1, Entries: nil, LeaderCommitIndex: mylastAppliedIndex}
+
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("sendHeartbeat: Sent heartbeat to %d: %#+v.", i, appendEntriesArgs))
+
+		client.Call("RaftServer.AppendEntries", appendEntriesArgs,
 			&appendEntriesResult)
+
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("sendHeartbeat: Received reply from %d: %#+v.", i, appendEntriesResult))
 
 		if appendEntriesResult.CurrentTerm > me.currentTerm {
 			me.mux.Lock()
@@ -622,7 +639,7 @@ func LeaderElection() error {
 		allServers := serversUnion(activeServers, newServers)
 
 		// no election necessary if the last message was received after we went to sleep.
-		if me.lastMessageTime > asleep || me.serverIndex == me.leaderIndex || !isElementPresentInArray(allServers, me.serverIndex) {
+		if me.isAwake() == 0 || me.lastMessageTime > asleep || me.serverIndex == me.leaderIndex || !isElementPresentInArray(allServers, me.serverIndex) {
 			continue
 		}
 
@@ -632,13 +649,20 @@ func LeaderElection() error {
 		// var electionTimeout = (time.Now().UnixNano()) + int64(rand.Intn(me.electionMaxTime-me.electionMinTime)+me.electionMinTime)
 		// For leaderElection: Increment currentTerm
 		me.mux.Lock()
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("LeaderElection: incrementing currentTerm from %d to %d.", me.currentTerm, me.currentTerm+1))
 		me.currentTerm++
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("LeaderElection: incremented currentTerm to %d.", me.currentTerm))
 		me.serverVotedFor = me.serverIndex
 		currentElectionTerm := me.currentTerm
 		lastLogEntryTerm := me.lastLogEntryTerm
 		lastLogEntryIndex := me.lastLogEntryIndex
 		myserverIndex := me.serverIndex
 		me.mux.Unlock()
+
+		rss := RaftServerSnapshot{}
+		RaftServerToSnapshot(&me, &rss)
+
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("LeaderElection: Electing self: %#+v", rss))
 
 		metadataContent := [2]string{strconv.Itoa(currentElectionTerm), strconv.Itoa(myserverIndex)}
 		err := ioutil.WriteFile(config.Servers[myserverIndex].Metadata, []byte(strings.Join(metadataContent[:], "\n")), 0)
@@ -679,7 +703,7 @@ func LeaderElection() error {
 					conn, err := net.DialTimeout("tcp", config.Servers[index].Host+":"+config.Servers[index].Port, 200*time.Millisecond)
 
 					if err != nil {
-						debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "Candidate unable to create connection with another server %s"+err.Error())
+						debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "LeaderElection: Candidate unable to create connection with another server %s"+err.Error())
 					} else {
 						client := rpc.NewClient(conn)
 						conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
@@ -695,9 +719,9 @@ func LeaderElection() error {
 						err := client.Call("RaftServer.RequestVote", voteRequest, requestVoteResponses[index])
 
 						if err != nil {
-							debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "Error in request vote "+err.Error())
+							debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "LeaderElection: Error in request vote "+err.Error())
 						}
-						debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("Vote granted by server %d %#+v", index, requestVoteResponses[index]))
+						debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("LeaderElection: Vote reply received from server %d: %#+v", index, requestVoteResponses[index]))
 
 						if requestVoteResponses[index].VoteGranted {
 							le.mux.Lock()
@@ -713,7 +737,7 @@ func LeaderElection() error {
 									le.wg.Done()
 								}
 							}
-							debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("majority counts %d %#+v", le.majorityCounter, le.majorityCounterNew))
+							debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("LeaderElection: majority counts %#+v", le))
 							le.mux.Unlock()
 						} else {
 							if requestVoteResponses[index].CurrentTerm > currentElectionTerm {
@@ -754,7 +778,7 @@ func LeaderElection() error {
 			if currentElectionTerm == me.currentTerm {
 				me.mux.Lock()
 				me.leaderIndex = me.serverIndex
-				debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, "Leader elected")
+				debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("LeaderElection: I was elected leader for term: %d.", me.currentTerm))
 				length := len(me.logs)
 				for _, i := range allServers {
 					me.nextIndex[i] = length
@@ -850,7 +874,7 @@ func LogReplication(lastLogEntryIndex int) error {
 					}
 
 					debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS,
-						fmt.Sprintf("next index ====> %d %d %d", me.nextIndex[server], len(logEntries), len(me.logs)))
+						fmt.Sprintf("LogReplication: next index ====> %d %d %d", me.nextIndex[server], len(logEntries), len(me.logs)))
 
 					prevlogIndex := me.nextIndex[server] - 1
 					prevlogTerm := "0"
@@ -876,7 +900,7 @@ func LogReplication(lastLogEntryIndex int) error {
 
 					conn, err := net.DialTimeout("tcp", config.Servers[server].Host+":"+config.Servers[server].Port, 200*time.Millisecond)
 					if err != nil {
-						debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "Leader unable to make connection for log replication"+err.Error())
+						debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "LogReplication: Leader unable to make connection for log replication"+err.Error())
 						break
 					} else {
 						conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
@@ -886,7 +910,7 @@ func LogReplication(lastLogEntryIndex int) error {
 						err := client.Call("RaftServer.AppendEntries", appendEntriesArgs, &appendEntriesReturn)
 						if err == nil {
 
-							debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, fmt.Sprintf("received response for ===== %d %#+v", lastLogEntryIndex, appendEntriesReturn))
+							debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, fmt.Sprintf("LogReplication: received response for ===== %d %#+v", lastLogEntryIndex, appendEntriesReturn))
 
 							if appendEntriesReturn.Success {
 								me.mux.Lock()
@@ -945,7 +969,7 @@ func LogReplication(lastLogEntryIndex int) error {
 								me.mux.Unlock()
 							}
 						} else {
-							debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "error from append entry"+err.Error())
+							debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "LogReplication: error from append entry"+err.Error())
 						}
 					}
 				}
@@ -996,7 +1020,7 @@ func Init(index int, verbose int) error {
 		lines = strings.Split(string(fileContent), "\n")
 	}
 
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.WRITES, "length of logs ======> "+strconv.Itoa(len(lines)))
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.WRITES, "Init: length of logs ======> "+strconv.Itoa(len(lines)))
 	for index := range lines {
 		line := strings.Split(lines[index], ",")
 		thisLog := LogEntry{Key: line[0], Value: line[1], TermID: line[2], IndexID: line[3]}
@@ -1049,7 +1073,7 @@ func Init(index int, verbose int) error {
 	// listener, e := net.Listen("tcp", config[index]["host"]+":"+config[index]["port"])
 	listener, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
-		debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "Listen error: "+err.Error())
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.CONNECTIONS, "Init: Listen error: "+err.Error())
 	}
 
 	for {
@@ -1064,7 +1088,7 @@ func Init(index int, verbose int) error {
 func runServer(serverIndex int, verbose int) (RaftServer, error) {
 	pid := os.Getpid()
 
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.LIVENESS, fmt.Sprintf("Server %d starts with process id: %d", serverIndex, pid))
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.LIVENESS, fmt.Sprintf("runServer: Server %d starts with process id: %d", serverIndex, pid))
 
 	filename := config.Servers[serverIndex].Filename
 	logFileName := config.Servers[serverIndex].LogFile
