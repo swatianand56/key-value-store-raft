@@ -6,10 +6,12 @@ someone must be able to be elected leader in a reasonably short amount of time.
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 )
 
-var clusterSize = 5
+var clusterSize = 9
+var maxRounds = 20
 
 func main() {
 	TestLeaderReplacementLoop()
@@ -17,10 +19,10 @@ func main() {
 
 // func TestLeaderReplacementLoop(t *testing.T) {
 func TestLeaderReplacementLoop() {
-	stutters := []int{ /*50, 150, 250,*/ 500, 750, 1000}
+	stutters := []int{50, 150, 250, 500, 750, 1000}
 	for _, stutter := range stutters {
 		fmt.Println("Starting", stutter, "ms test.", time.Now())
-		for i := 0; i < 20; i++ {
+		for i := 0; i < 100; i++ {
 			xTestLeaderReplacement(time.Duration(stutter) * time.Millisecond)
 		}
 		fmt.Println("Finished", stutter, "ms test.", time.Now())
@@ -29,9 +31,8 @@ func TestLeaderReplacementLoop() {
 
 // func xTestLeaderReplacement(t *testing.T, stutter time.Duration) {
 func xTestLeaderReplacement(stutter time.Duration) {
-	flags := 1 //VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
+	flags := VERBOSE.STATE //VERBOSE.HEARTBEATS + VERBOSE.LIVENESS + VERBOSE.STATE
 	slept := 0 * time.Millisecond
-	var state = RaftServerSnapshot{}
 	iters := 0
 
 	debugMessage(flags, -1, VERBOSE.STATE, "Electing a leader for leader replacement test.")
@@ -47,24 +48,27 @@ func xTestLeaderReplacement(stutter time.Duration) {
 		newLeader := leader
 		// TODO: for full perf data // runTime := time.Now()
 		// TODO: for full perf data // for iters = 0; leader == newLeader && time.Since(runTime) < 60*time.Second; iters++ {
-		for iters = 0; leader == newLeader && iters < 100; iters++ {
+		for iters = 0; iters < maxRounds && (newLeader == leader || newLeader == -1); iters++ {
 			// put the leader to sleep for X time, then wait that long.
 			err = ServerCall("Sleep", leader, int(stutter.Seconds()*1000), &slept)
 			if err != nil {
 				fmt.Println(err)
 			}
 			if iters > 10 {
-				debugMessage(flags, -1, VERBOSE.HEARTBEATS, fmt.Sprintf("%d: Slept leader %d.", iters, newLeader))
+				debugMessage(flags, -1, VERBOSE.HEARTBEATS, fmt.Sprintf("%d: Slept leader %d.", iters, leader))
 			}
 			time.Sleep(stutter)
 			if iters > 10 {
 				debugMessage(flags, -1, VERBOSE.HEARTBEATS, fmt.Sprintf("%d: Test woke up.", iters))
 			}
 
-			// FIXME: somehow we don't notice leader change when node 2 started as the leader.
+			// FIXME: somehow we don't notice leader change to zero when node 2 started as the leader.
+			queryServer := rand.Intn(clusterSize)
 
 			// see if we've picked a new leader then.
-			ServerCall("GetState", (leader+1)%clusterSize, 0, &state)
+			var state = RaftServerSnapshot{LeaderIndex: -1, ServerIndex: -1}
+			ServerCall("GetState", queryServer, 0, &state)
+			debugMessage(flags, -1, VERBOSE.HEARTBEATS, fmt.Sprintf("%d: Found state: %#+v.", iters, state))
 			newLeader = state.LeaderIndex
 		}
 

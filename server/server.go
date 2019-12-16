@@ -284,11 +284,11 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 	defer me.mux.Unlock()
 	me.lastMessageTime = time.Now().UnixNano()
 
-	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Received heartbeat %#+v.", args))
+	debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Received heartbeat: LeaderTerm %d, LeaderID %d, PrevLogIndex %d, PrevLogTerm %d, LeaderCommitIndex %d.", args.LeaderTerm, args.LeaderID, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommitIndex))
 
 	// heartbeat
 	if len(args.Entries) == 0 {
-		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: No entries.", args))
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: No entries, %d.", args.LeaderTerm))
 		reply.CurrentTerm = args.LeaderTerm
 		me.commitIndex = int(math.Min(float64(args.LeaderCommitIndex), float64(me.lastLogEntryIndex)))
 		if args.LeaderTerm > me.currentTerm {
@@ -303,14 +303,19 @@ func (me *RaftServer) AppendEntries(args AppendEntriesArgs, reply *AppendEntries
 					"AppendEntries: Unable to write the new metadata information "+err.Error())
 				return err
 			}
-			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Bigger term, set leader.", args))
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Bigger term, set leader, %d.", args.LeaderTerm))
 		} else if args.LeaderTerm == me.currentTerm {
-			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Same term, set leader.", args))
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Same term, set leader, %d.", args.LeaderTerm))
 			me.leaderIndex = args.LeaderID
 		} else if args.LeaderTerm < me.currentTerm {
-			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Lower term, rejected leader.", args))
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Lower term, rejected leader, %d.", args.LeaderTerm))
 			reply.CurrentTerm = me.currentTerm
 		}
+
+		rss := RaftServerSnapshot{}
+		RaftServerToSnapshot(me, &rss)
+		debugMessage(me.verbose, me.serverIndex, VERBOSE.HEARTBEATS, fmt.Sprintf("AppendEnries: Current state: %#+v", rss))
+
 		return nil
 	}
 
@@ -428,8 +433,9 @@ func (me *RaftServer) RequestVote(args RequestVoteArgs, reply *RequestVoteRespon
 			if err != nil {
 				fmt.Println("Request Vote RPC: Unable to write to metadata file ", myserverIndex, mycurrentTerm, args.CandidateIndex)
 			}
+		} else {
+			debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: refused vote for %d, term %d was good, but log %d or index %d was not.", args.CandidateIndex, args.CandidateTerm, args.LastLogTerm, args.LastLogIndex))
 		}
-		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: refused vote for $d, term was good, but log was not.", args.CandidateIndex, args.CandidateTerm))
 	} else {
 		reply.CurrentTerm = mycurrentTerm
 		debugMessage(me.verbose, me.serverIndex, VERBOSE.VOTES, fmt.Sprintf("RequestVote: refused vote for %d, I already voted for %d in term %d.", args.CandidateIndex, me.serverVotedFor, args.CandidateTerm))
