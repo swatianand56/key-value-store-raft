@@ -1014,7 +1014,7 @@ func Init(index int, verbose int) error {
 	me.nextIndex = make(map[int]int)
 	me.matchIndex = make(map[int]int)
 
-	me.leaderHeartBeatDuration = 150
+	me.leaderHeartBeatDuration = 150 // shouldn't that be 50ms instead of 150?  that allows the leader to be replaced if it gets unlucky.
 	me.electionMaxTime = 500000000
 	me.electionMinTime = 350000000
 
